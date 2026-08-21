@@ -57,7 +57,10 @@ export async function getTransaction(id) {
   return request(`/transactions/${id}`);
 }
 
-export async function updateReviewStatus(id, status) {
+export async function updateReviewStatus(
+  id,
+  status
+) {
   return request(
     `/transactions/${id}/review`,
     {

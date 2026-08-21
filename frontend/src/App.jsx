@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import "./App.css";
+import FraudCopilot from "./pages/FraudCopilot";
 
 import {
   API_BASE,
@@ -129,6 +130,12 @@ const PAGE_INFO = {
     title: "Transaction History",
     description:
       "Review and investigate analyzed transactions.",
+  },
+  copilot: {
+    eyebrow: "AI TOOLS",
+    title: "Fraud Copilot",
+    description:
+      "Ask questions about transaction risk and fraud detection.",
   },
   analytics: {
     eyebrow: "PERFORMANCE",
@@ -327,6 +334,14 @@ function App() {
           />
         );
 
+      case "copilot":
+        return (
+          <FraudCopilot
+            history={history}
+            lastPrediction={lastResult}
+          />
+        );
+
       case "model":
         return (
           <ModelPage
@@ -442,6 +457,7 @@ function Sidebar({
       items: [
         ["history", "Transactions", "◷"],
         ["analytics", "Analytics", "▥"],
+        ["copilot", "Fraud Copilot", "✦"],
       ],
     },
     {

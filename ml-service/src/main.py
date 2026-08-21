@@ -10,7 +10,6 @@ from fastapi import Depends
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -27,14 +26,8 @@ from .model import TransactionRecord
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv(
-    "OPENAI_API_KEY"
-)
-
-OPENAI_MODEL = os.getenv(
-    "OPENAI_MODEL",
-    "gpt-5.6"
-)
+# OpenAI is no longer required.
+# Fraud Copilot is handled locally by this API.
 
 
 # ============================================================
@@ -43,11 +36,7 @@ OPENAI_MODEL = os.getenv(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
-    Base.metadata.create_all(
-        bind=engine
-    )
-
+    Base.metadata.create_all(bind=engine)
     yield
 
 
@@ -96,21 +85,9 @@ feature_list = joblib.load(
 
 with open(
     "models/model_metadata.json",
-    "r"
+    "r",
 ) as file:
     metadata = json.load(file)
-
-
-# ============================================================
-# OpenAI client
-# ============================================================
-
-openai_client = None
-
-if OPENAI_API_KEY:
-    openai_client = OpenAI(
-        api_key=OPENAI_API_KEY
-    )
 
 
 # ============================================================
@@ -118,25 +95,18 @@ if OPENAI_API_KEY:
 # ============================================================
 
 class Transaction(BaseModel):
-
     features: list[float]
-
     reference: str | None = None
-
     transaction_time: str | None = None
 
 
 class AssistantRequest(BaseModel):
-
     message: str
-
     prediction: dict | None = None
-
     history: list[dict] | None = None
 
 
 class ReviewRequest(BaseModel):
-
     status: str
 
 
@@ -186,27 +156,18 @@ def get_risk_explanation(
 def transaction_to_dict(
     transaction: TransactionRecord,
 ):
-
     return {
         "id": transaction.id,
         "reference": transaction.reference,
-        "transaction_time": (
-            transaction.transaction_time
-        ),
+        "transaction_time": transaction.transaction_time,
         "amount": transaction.amount,
         "probability": transaction.probability,
         "fraud": transaction.fraud,
         "risk_level": transaction.risk_level,
-        "risk_explanation": (
-            transaction.risk_explanation
-        ),
+        "risk_explanation": transaction.risk_explanation,
         "threshold": transaction.threshold,
-        "model_version": (
-            transaction.model_version
-        ),
-        "review_status": (
-            transaction.review_status
-        ),
+        "model_version": transaction.model_version,
+        "review_status": transaction.review_status,
         "features": transaction.features,
         "created_at": (
             transaction.created_at.isoformat()
@@ -217,22 +178,318 @@ def transaction_to_dict(
 
 
 # ============================================================
+# Local Fraud Copilot
+# ============================================================
+
+def local_copilot_response(
+    message: str,
+    prediction: dict | None,
+    history: list[dict] | None,
+) -> str:
+
+    text = message.lower().strip()
+
+    probability = None
+    fraud = None
+    risk_level = None
+    threshold = float(
+        metadata.get("threshold", 0.55)
+    )
+    reference = None
+    review_status = None
+    amount = None
+
+    if prediction:
+        probability = float(
+            prediction.get("probability", 0)
+        )
+
+        fraud = bool(
+            prediction.get("fraud", False)
+        )
+
+        risk_level = prediction.get(
+            "risk_level"
+        )
+
+        threshold = float(
+            prediction.get(
+                "threshold",
+                threshold,
+            )
+        )
+
+        reference = prediction.get(
+            "reference"
+        )
+
+        review_status = prediction.get(
+            "review_status"
+        )
+
+        amount = prediction.get(
+            "amount"
+        )
+
+    if risk_level is None and probability is not None:
+        risk_level = get_risk_level(
+            probability,
+            threshold,
+        )
+
+    # --------------------------------------------------------
+    # Current transaction risk
+    # --------------------------------------------------------
+
+    if (
+        "why" in text
+        and (
+            "risk" in text
+            or "fraud" in text
+            or "suspicious" in text
+        )
+    ):
+        if probability is None:
+            return (
+                "There is no current transaction prediction "
+                "available. Analyze a transaction first."
+            )
+
+        explanation = get_risk_explanation(
+            probability,
+            threshold,
+            risk_level or "Low",
+        )
+
+        return (
+            f"{reference or 'This transaction'} has a "
+            f"fraud probability of "
+            f"{probability * 100:.2f}%. "
+            f"The configured decision threshold is "
+            f"{threshold * 100:.0f}%. "
+            f"{explanation}"
+        )
+
+    # --------------------------------------------------------
+    # Probability
+    # --------------------------------------------------------
+
+    if "probability" in text:
+        if probability is None:
+            return (
+                "No current fraud probability is available. "
+                "Analyze a transaction first."
+            )
+
+        return (
+            f"The current fraud probability is "
+            f"{probability * 100:.2f}%. "
+            "This is a risk score, not absolute proof "
+            "that the transaction is fraudulent."
+        )
+
+    # --------------------------------------------------------
+    # Threshold
+    # --------------------------------------------------------
+
+    if "threshold" in text:
+        return (
+            f"FraudLens currently uses a "
+            f"{threshold * 100:.0f}% decision threshold. "
+            "At or above this level, the model classifies "
+            "the transaction as potentially fraudulent."
+        )
+
+    # --------------------------------------------------------
+    # Current transaction
+    # --------------------------------------------------------
+
+    if (
+        "transaction" in text
+        and (
+            "details" in text
+            or "current" in text
+            or "tell me about" in text
+        )
+    ):
+        if prediction is None:
+            return (
+                "There is no current transaction prediction "
+                "available."
+            )
+
+        amount_text = (
+            f"${float(amount):.2f}"
+            if amount is not None
+            else "not provided"
+        )
+
+        return (
+            f"Reference: {reference or 'Not specified'}\n"
+            f"Amount: {amount_text}\n"
+            f"Risk level: {risk_level or 'Unknown'}\n"
+            f"Fraud probability: "
+            f"{(probability or 0) * 100:.2f}%\n"
+            f"Decision: "
+            f"{'Potential Fraud' if fraud else 'Legitimate'}\n"
+            f"Review status: "
+            f"{review_status or 'Pending'}"
+        )
+
+    # --------------------------------------------------------
+    # Review guidance
+    # --------------------------------------------------------
+
+    if (
+        "review" in text
+        or "what should i do" in text
+        or "action" in text
+    ):
+        if probability is None:
+            return (
+                "Analyze a transaction first. "
+                "Then I can explain the appropriate "
+                "review action."
+            )
+
+        if fraud or probability >= threshold:
+            return (
+                "This transaction should be reviewed because "
+                f"its fraud probability is "
+                f"{probability * 100:.2f}%, which meets or "
+                f"exceeds the {threshold * 100:.0f}% threshold."
+            )
+
+        return (
+            "The transaction is currently below the fraud "
+            "decision threshold. It does not appear to "
+            "require fraud escalation based on this model result."
+        )
+
+    # --------------------------------------------------------
+    # Model information
+    # --------------------------------------------------------
+
+    if (
+        "model" in text
+        or "random forest" in text
+    ):
+        return (
+            f"FraudLens currently uses the "
+            f"{metadata.get('model_name', 'Random Forest')} "
+            f"model, version "
+            f"{metadata.get('model_version', '1.0.0')}, "
+            f"with a "
+            f"{threshold * 100:.0f}% decision threshold "
+            f"and {len(feature_list)} input features."
+        )
+
+    # --------------------------------------------------------
+    # Metrics
+    # --------------------------------------------------------
+
+    if (
+        "precision" in text
+        or "recall" in text
+        or "f1" in text
+        or "roc" in text
+        or "pr-auc" in text
+        or "metrics" in text
+    ):
+        precision = metadata.get("precision")
+        recall = metadata.get("recall")
+        f1 = metadata.get("f1_score")
+        roc_auc = metadata.get("roc_auc")
+        pr_auc = metadata.get("pr_auc")
+
+        return (
+            "Current model evaluation metrics:\n"
+            f"Precision: "
+            f"{precision * 100:.2f}%\n"
+            f"Recall: "
+            f"{recall * 100:.2f}%\n"
+            f"F1 Score: "
+            f"{f1 * 100:.2f}%\n"
+            f"ROC-AUC: "
+            f"{roc_auc * 100:.2f}%\n"
+            f"PR-AUC: "
+            f"{pr_auc * 100:.2f}%"
+        )
+
+    # --------------------------------------------------------
+    # History
+    # --------------------------------------------------------
+
+    if (
+        "history" in text
+        or "recent" in text
+        or "transactions" in text
+    ):
+        if not history:
+            return (
+                "There are no recent transaction records "
+                "available yet."
+            )
+
+        fraud_count = sum(
+            1
+            for item in history
+            if item.get("fraud")
+        )
+
+        return (
+            f"There are {len(history)} recent transaction "
+            f"records in the supplied context. "
+            f"{fraud_count} are classified as fraud."
+        )
+
+    # --------------------------------------------------------
+    # Help
+    # --------------------------------------------------------
+
+    if (
+        "help" in text
+        or "what can you do" in text
+    ):
+        return (
+            "I can explain the current transaction risk, "
+            "fraud probability, decision threshold, model "
+            "information, evaluation metrics, recent "
+            "transaction activity and recommended review action."
+        )
+
+    # --------------------------------------------------------
+    # Default response
+    # --------------------------------------------------------
+
+    if prediction:
+        return (
+            f"I can help explain "
+            f"{reference or 'the current transaction'}. "
+            "Try asking why it was classified as high or low "
+            "risk, what the fraud probability means, or what "
+            "the decision threshold means."
+        )
+
+    return (
+        "I can help with transaction risk, fraud probability, "
+        "decision thresholds, model information and recent "
+        "transaction activity. Analyze a transaction first "
+        "for more specific context."
+    )
+
+
+# ============================================================
 # Health check
 # ============================================================
 
 @app.get("/")
 def home():
-
     return {
-        "message": (
-            "Fraud Detection API is running"
-        ),
-        "version": metadata[
-            "model_version"
-        ],
-        "ai_assistant": (
-            openai_client is not None
-        ),
+        "message": "Fraud Detection API is running",
+        "version": metadata["model_version"],
+        "ai_assistant": True,
+        "assistant_type": "local",
         "database": "PostgreSQL",
     }
 
@@ -257,21 +514,11 @@ def model_info():
             "threshold",
             0.55,
         ),
-        "precision": metadata.get(
-            "precision"
-        ),
-        "recall": metadata.get(
-            "recall"
-        ),
-        "f1_score": metadata.get(
-            "f1_score"
-        ),
-        "roc_auc": metadata.get(
-            "roc_auc"
-        ),
-        "pr_auc": metadata.get(
-            "pr_auc"
-        ),
+        "precision": metadata.get("precision"),
+        "recall": metadata.get("recall"),
+        "f1_score": metadata.get("f1_score"),
+        "roc_auc": metadata.get("roc_auc"),
+        "pr_auc": metadata.get("pr_auc"),
         "training_date": metadata.get(
             "training_date"
         ),
@@ -279,9 +526,7 @@ def model_info():
             "features",
             feature_list,
         ),
-        "feature_count": len(
-            feature_list
-        ),
+        "feature_count": len(feature_list),
     }
 
 
@@ -295,38 +540,22 @@ def predict(
     db: Session = Depends(get_db),
 ):
 
-    # --------------------------------------------------------
-    # Validate feature count
-    # --------------------------------------------------------
-
     if len(transaction.features) != len(
         feature_list
     ):
-
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Expected "
-                f"{len(feature_list)} "
+                f"Expected {len(feature_list)} "
                 f"features, received "
                 f"{len(transaction.features)}."
             ),
         )
 
-
-    # --------------------------------------------------------
-    # Convert features to DataFrame
-    # --------------------------------------------------------
-
     input_data = pd.DataFrame(
         [transaction.features],
         columns=feature_list,
     )
-
-
-    # --------------------------------------------------------
-    # Predict fraud probability
-    # --------------------------------------------------------
 
     probability = float(
         model.predict_proba(
@@ -334,49 +563,24 @@ def predict(
         )[0][1]
     )
 
-
-    # --------------------------------------------------------
-    # Decision threshold
-    # --------------------------------------------------------
-
     threshold = float(
         metadata["threshold"]
     )
 
-
-    # --------------------------------------------------------
-    # Fraud classification
-    # --------------------------------------------------------
-
     prediction = int(
         probability >= threshold
     )
-
-
-    # --------------------------------------------------------
-    # Risk level
-    # --------------------------------------------------------
 
     risk_level = get_risk_level(
         probability,
         threshold,
     )
 
-
-    # --------------------------------------------------------
-    # Risk explanation
-    # --------------------------------------------------------
-
     risk_explanation = get_risk_explanation(
         probability,
         threshold,
         risk_level,
     )
-
-
-    # --------------------------------------------------------
-    # Reference
-    # --------------------------------------------------------
 
     reference = (
         transaction.reference
@@ -388,92 +592,48 @@ def predict(
         )
     )
 
-
-    # --------------------------------------------------------
-    # Amount
-    # --------------------------------------------------------
-
     amount = float(
         transaction.features[-1]
     )
 
-
-    # --------------------------------------------------------
-    # Save prediction in PostgreSQL
-    # --------------------------------------------------------
-
     record = TransactionRecord(
-
         reference=reference,
-
         transaction_time=(
             transaction.transaction_time
         ),
-
         amount=amount,
-
         probability=probability,
-
         fraud=bool(prediction),
-
         risk_level=risk_level,
-
-        risk_explanation=(
-            risk_explanation
-        ),
-
+        risk_explanation=risk_explanation,
         threshold=threshold,
-
         model_version=metadata[
             "model_version"
         ],
-
         review_status="Pending",
-
         features=[
             float(value)
             for value in transaction.features
         ],
     )
 
-
     db.add(record)
-
     db.commit()
-
     db.refresh(record)
 
-
-    # --------------------------------------------------------
-    # Return response
-    # --------------------------------------------------------
-
     return {
-
         "id": record.id,
-
         "reference": record.reference,
-
+        "amount": record.amount,
         "fraud": bool(prediction),
-
         "probability": probability,
-
         "risk_level": risk_level,
-
-        "risk_explanation": (
-            risk_explanation
-        ),
-
+        "risk_explanation": risk_explanation,
         "threshold": threshold,
-
         "model_version": metadata[
             "model_version"
         ],
-
-        "review_status": (
-            record.review_status
-        ),
-
+        "review_status": record.review_status,
     }
 
 
@@ -522,15 +682,12 @@ def get_transaction(
     )
 
     if record is None:
-
         raise HTTPException(
             status_code=404,
             detail="Transaction not found.",
         )
 
-    return transaction_to_dict(
-        record
-    )
+    return transaction_to_dict(record)
 
 
 # ============================================================
@@ -552,20 +709,14 @@ def update_review_status(
         "Dismissed",
     }
 
-
-    if request.status not in (
-        allowed_statuses
-    ):
-
+    if request.status not in allowed_statuses:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Status must be "
-                "Pending, Reviewed, "
-                "or Dismissed."
+                "Status must be Pending, "
+                "Reviewed, or Dismissed."
             ),
         )
-
 
     record = (
         db.query(TransactionRecord)
@@ -576,27 +727,20 @@ def update_review_status(
         .first()
     )
 
-
     if record is None:
-
         raise HTTPException(
             status_code=404,
             detail="Transaction not found.",
         )
-
 
     record.review_status = (
         request.status
     )
 
     db.commit()
-
     db.refresh(record)
 
-
-    return transaction_to_dict(
-        record
-    )
+    return transaction_to_dict(record)
 
 
 # ============================================================
@@ -618,7 +762,6 @@ def get_analytics(
         or 0
     )
 
-
     fraud = (
         db.query(
             func.count(
@@ -626,18 +769,13 @@ def get_analytics(
             )
         )
         .filter(
-            TransactionRecord.fraud
-            == True
+            TransactionRecord.fraud == True
         )
         .scalar()
         or 0
     )
 
-
-    legitimate = (
-        total - fraud
-    )
-
+    legitimate = total - fraud
 
     average_probability = (
         db.query(
@@ -649,7 +787,6 @@ def get_analytics(
         or 0
     )
 
-
     highest_probability = (
         db.query(
             func.max(
@@ -660,174 +797,48 @@ def get_analytics(
         or 0
     )
 
-
     fraud_rate = (
         (fraud / total) * 100
         if total > 0
         else 0
     )
 
-
     return {
-
         "total_transactions": total,
-
         "legitimate": legitimate,
-
         "fraud_detected": fraud,
-
-        "fraud_rate": float(
-            fraud_rate
-        ),
-
+        "fraud_rate": float(fraud_rate),
         "average_risk": float(
             average_probability
         ),
-
         "highest_risk": float(
             highest_probability
         ),
-
     }
 
 
 # ============================================================
-# AI Fraud Copilot
+# Local Fraud Copilot
 # ============================================================
 
 @app.post("/assistant")
 def assistant(
-    request: AssistantRequest
+    request: AssistantRequest,
 ):
 
     message = request.message.strip()
 
-
     if not message:
-
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Message cannot be empty."
-            ),
+            detail="Message cannot be empty.",
         )
-
-
-    if openai_client is None:
-
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "OpenAI API key is not configured. "
-                "Add OPENAI_API_KEY to "
-                "ml-service/.env."
-            ),
-        )
-
-
-    if request.prediction:
-
-        prediction_context = json.dumps(
-            request.prediction,
-            indent=2,
-        )
-
-    else:
-
-        prediction_context = (
-            "No transaction has been "
-            "analyzed yet."
-        )
-
-
-    if request.history:
-
-        history_context = json.dumps(
-            request.history[-10:],
-            indent=2,
-        )
-
-    else:
-
-        history_context = (
-            "No recent transaction history "
-            "is available."
-        )
-
-
-    instructions = """
-You are Fraud Copilot, an AI assistant inside a
-credit-card fraud detection platform.
-
-Your purpose is to help users understand:
-
-- transaction risk
-- fraud probability
-- decision thresholds
-- model predictions
-- recent transaction activity
-- basic fraud-detection concepts
-
-Important rules:
-
-1. Be concise, clear, and professional.
-2. Explain technical concepts in simple language.
-3. A model prediction is a risk signal, not absolute proof
-   that a transaction is fraudulent.
-4. Never invent transaction values or model results.
-5. Use the supplied prediction and history when relevant.
-6. Do not claim that you performed actions that you did not perform.
-7. When discussing probabilities, clearly distinguish probability
-   from certainty.
-8. If there is no current transaction, say so.
-9. Do not expose API keys, secrets, or internal credentials.
-10. If asked about the system architecture, explain the flow:
-    React frontend -> FastAPI -> ML model -> PostgreSQL.
-"""
-
-
-    user_input = f"""
-User question:
-{message}
-
-Current prediction:
-{prediction_context}
-
-Recent transaction history:
-{history_context}
-
-Model version:
-{metadata["model_version"]}
-
-Decision threshold:
-{metadata["threshold"]}
-"""
-
-
-    try:
-
-        response = (
-            openai_client.responses.create(
-                model=OPENAI_MODEL,
-                instructions=instructions,
-                input=user_input,
-            )
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "AI assistant request failed: "
-                f"{str(error)}"
-            ),
-        )
-
 
     return {
-        "reply":
-            response.output_text,
-        "model":
-            OPENAI_MODEL,
+        "reply": local_copilot_response(
+            message=message,
+            prediction=request.prediction,
+            history=request.history,
+        ),
+        "model": "FraudLens Local Copilot",
     }
