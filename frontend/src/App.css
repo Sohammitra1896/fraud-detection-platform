@@ -2315,3 +2315,83 @@ button:disabled {
     flex-wrap: wrap;
   }
 }
+/* =========================================================
+   MODEL METRICS
+========================================================= */
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.metric-card {
+  min-height: 105px;
+  padding: 15px;
+  border-radius: 9px;
+  background: #f8f9fc;
+  border: 1px solid #eef0f4;
+}
+
+.metric-label {
+  display: block;
+  color: #8d98ae;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+
+.metric-value {
+  display: block;
+  margin-top: 11px;
+  color: #28334d;
+  font-size: 20px;
+  font-weight: 750;
+}
+
+.metric-card small {
+  display: block;
+  margin-top: 6px;
+  color: #98a2b5;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.metric-card.purple {
+  background: #f5f3ff;
+}
+
+.metric-card.green {
+  background: #f0faf5;
+}
+
+.metric-card.blue {
+  background: #f1f5ff;
+}
+
+.metric-card.neutral {
+  background: #f8f9fc;
+}
+
+.metrics-loading {
+  min-height: 105px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #929db2;
+  font-size: 9px;
+}
+
+@media (max-width: 1100px) {
+  .metrics-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

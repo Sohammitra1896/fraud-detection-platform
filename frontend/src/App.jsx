@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -69,6 +69,20 @@ const SAMPLE_TRANSACTION = [
   149.62,
 ];
 
+const DEFAULT_MODEL = {
+  model_name: "Random Forest",
+  model_version: "1.0.0",
+  threshold: 0.55,
+  precision: null,
+  recall: null,
+  f1_score: null,
+  roc_auc: null,
+  pr_auc: null,
+  training_date: null,
+  features: FEATURE_NAMES,
+  feature_count: 30,
+};
+
 const PAGE_INFO = {
   dashboard: {
     eyebrow: "OVERVIEW",
@@ -76,36 +90,42 @@ const PAGE_INFO = {
     description:
       "Monitor transaction activity, risk signals and fraud detection performance.",
   },
+
   analyze: {
     eyebrow: "TRANSACTION ANALYSIS",
     title: "Analyze Transaction",
     description:
       "Submit transaction features and evaluate fraud probability using the deployed model.",
   },
+
   history: {
     eyebrow: "TRANSACTION RECORDS",
     title: "Transaction History",
     description:
       "Review and explore previously analyzed transactions.",
   },
+
   analytics: {
     eyebrow: "PERFORMANCE",
     title: "Analytics",
     description:
       "Understand transaction risk and fraud detection patterns.",
   },
+
   model: {
     eyebrow: "MACHINE LEARNING",
     title: "Model",
     description:
       "View information about the deployed fraud detection model.",
   },
+
   settings: {
     eyebrow: "CONFIGURATION",
     title: "Settings",
     description:
       "View application, API and model configuration.",
   },
+
   about: {
     eyebrow: "PLATFORM",
     title: "About",
@@ -114,31 +134,47 @@ const PAGE_INFO = {
   },
 };
 
+
+/* =========================================================
+   MAIN APP
+========================================================= */
+
 function App() {
-  const [activePage, setActivePage] = useState("dashboard");
+  const [activePage, setActivePage] =
+    useState("dashboard");
 
-  const [history, setHistory] = useState(() => {
-    try {
-      const saved = localStorage.getItem("fraudlens_history");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [history, setHistory] =
+    useState(() => {
+      try {
+        const saved =
+          localStorage.getItem(
+            "fraudlens_history"
+          );
 
-  const [apiOnline, setApiOnline] = useState(false);
+        return saved
+          ? JSON.parse(saved)
+          : [];
+      } catch {
+        return [];
+      }
+    });
 
-  const [lastResult, setLastResult] = useState(null);
+  const [apiOnline, setApiOnline] =
+    useState(false);
 
-  const modelInfo = useMemo(
-    () => ({
-      name: "Random Forest",
-      version: "1.0.0",
-      threshold: 0.55,
-      features: 30,
-    }),
-    []
-  );
+  const [modelInfo, setModelInfo] =
+    useState(DEFAULT_MODEL);
+
+  const [lastResult, setLastResult] =
+    useState(null);
+
+  const [modelLoading, setModelLoading] =
+    useState(true);
+
+
+  /* -------------------------------------------------------
+     SAVE HISTORY
+  ------------------------------------------------------- */
 
   useEffect(() => {
     localStorage.setItem(
@@ -147,26 +183,71 @@ function App() {
     );
   }, [history]);
 
+
+  /* -------------------------------------------------------
+     CHECK API + LOAD MODEL
+  ------------------------------------------------------- */
+
   useEffect(() => {
     let mounted = true;
 
-    const checkApi = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/docs`);
+    const loadBackendData =
+      async () => {
+        try {
+          const healthResponse =
+            await fetch(
+              `${API_BASE}/`
+            );
 
-        if (mounted) {
-          setApiOnline(response.ok);
+          if (!mounted) {
+            return;
+          }
+
+          setApiOnline(
+            healthResponse.ok
+          );
+
+
+          /* -------------------------
+             LOAD MODEL INFO
+          ------------------------- */
+
+          const modelResponse =
+            await fetch(
+              `${API_BASE}/model`
+            );
+
+          if (
+            modelResponse.ok
+          ) {
+            const data =
+              await modelResponse.json();
+
+            if (mounted) {
+              setModelInfo({
+                ...DEFAULT_MODEL,
+                ...data,
+              });
+            }
+          }
+        } catch {
+          if (mounted) {
+            setApiOnline(false);
+          }
+        } finally {
+          if (mounted) {
+            setModelLoading(false);
+          }
         }
-      } catch {
-        if (mounted) {
-          setApiOnline(false);
-        }
-      }
-    };
+      };
 
-    checkApi();
+    loadBackendData();
 
-    const interval = setInterval(checkApi, 10000);
+    const interval =
+      setInterval(
+        loadBackendData,
+        15000
+      );
 
     return () => {
       mounted = false;
@@ -174,39 +255,93 @@ function App() {
     };
   }, []);
 
-  const addHistoryEntry = (data, values) => {
+
+  /* -------------------------------------------------------
+     ADD PREDICTION TO HISTORY
+  ------------------------------------------------------- */
+
+  const addHistoryEntry = (
+    data,
+    values
+  ) => {
     const entry = {
       id: Date.now(),
-      timestamp: new Date().toISOString(),
-      amount: Number(values[29] || 0),
-      fraud: Boolean(data.fraud),
-      probability: Number(data.probability || 0),
-      threshold: Number(data.threshold ?? 0.55),
-      modelVersion: data.model_version || "1.0.0",
+
+      timestamp:
+        new Date().toISOString(),
+
+      amount:
+        Number(values[29] || 0),
+
+      fraud:
+        Boolean(data.fraud),
+
+      probability:
+        Number(
+          data.probability || 0
+        ),
+
+      threshold:
+        Number(
+          data.threshold ??
+            modelInfo.threshold ??
+            0.55
+        ),
+
+      modelVersion:
+        data.model_version ||
+        modelInfo.model_version ||
+        "1.0.0",
     };
 
-    setHistory((previous) => [entry, ...previous]);
+    setHistory(
+      (previous) => [
+        entry,
+        ...previous,
+      ]
+    );
+
     setLastResult({
       ...data,
       entryId: entry.id,
     });
   };
 
+
+  /* -------------------------------------------------------
+     NAVIGATION
+  ------------------------------------------------------- */
+
   const navigate = (page) => {
     setActivePage(page);
+
     window.scrollTo({
       top: 0,
       behavior: "smooth",
     });
   };
 
+
+  /* -------------------------------------------------------
+     CLEAR HISTORY
+  ------------------------------------------------------- */
+
   const clearHistory = () => {
     setHistory([]);
-    localStorage.removeItem("fraudlens_history");
+
+    localStorage.removeItem(
+      "fraudlens_history"
+    );
   };
+
+
+  /* -------------------------------------------------------
+     RENDER PAGE
+  ------------------------------------------------------- */
 
   const renderPage = () => {
     switch (activePage) {
+
       case "dashboard":
         return (
           <Dashboard
@@ -216,35 +351,49 @@ function App() {
           />
         );
 
+
       case "analyze":
         return (
           <AnalyzePage
             apiOnline={apiOnline}
             modelInfo={modelInfo}
-            onPrediction={addHistoryEntry}
+            onPrediction={
+              addHistoryEntry
+            }
             lastResult={lastResult}
           />
         );
+
 
       case "history":
         return (
           <HistoryPage
             history={history}
             navigate={navigate}
-            clearHistory={clearHistory}
+            clearHistory={
+              clearHistory
+            }
           />
         );
 
+
       case "analytics":
-        return <AnalyticsPage history={history} />;
+        return (
+          <AnalyticsPage
+            history={history}
+          />
+        );
+
 
       case "model":
         return (
           <ModelPage
             modelInfo={modelInfo}
             apiOnline={apiOnline}
+            loading={modelLoading}
           />
         );
+
 
       case "settings":
         return (
@@ -254,8 +403,10 @@ function App() {
           />
         );
 
+
       case "about":
         return <AboutPage />;
+
 
       default:
         return (
@@ -268,34 +419,57 @@ function App() {
     }
   };
 
+
   return (
     <div className="app-shell">
+
       <Sidebar
         activePage={activePage}
         navigate={navigate}
         apiOnline={apiOnline}
       />
 
+
       <div className="main-area">
+
         <Topbar
-          page={PAGE_INFO[activePage]}
+          page={
+            PAGE_INFO[
+              activePage
+            ]
+          }
           navigate={navigate}
           apiOnline={apiOnline}
         />
+
 
         <main className="main-content">
           {renderPage()}
         </main>
 
+
         <footer className="app-footer">
-          <span>FraudLens</span>
-          <span>Intelligent Transaction Risk Detection</span>
-          <span>Model v1.0.0</span>
+          <span>
+            FraudLens
+          </span>
+
+          <span>
+            Intelligent Transaction
+            Risk Detection
+          </span>
+
+          <span>
+            Model{" "}
+            {modelInfo.model_version ||
+              "1.0.0"}
+          </span>
         </footer>
+
       </div>
     </div>
   );
 }
+
 
 /* =========================================================
    SIDEBAR
@@ -310,40 +484,75 @@ function Sidebar({
     {
       title: "OVERVIEW",
       items: [
-        ["dashboard", "Dashboard", "▦"],
+        [
+          "dashboard",
+          "Dashboard",
+          "▦",
+        ],
       ],
     },
+
     {
       title: "DETECTION",
       items: [
-        ["analyze", "Analyze Transaction", "⌁"],
+        [
+          "analyze",
+          "Analyze Transaction",
+          "⌁",
+        ],
       ],
     },
+
     {
       title: "INSIGHTS",
       items: [
-        ["history", "Transactions", "◷"],
-        ["analytics", "Analytics", "▥"],
+        [
+          "history",
+          "Transactions",
+          "◷",
+        ],
+        [
+          "analytics",
+          "Analytics",
+          "▥",
+        ],
       ],
     },
+
     {
       title: "SYSTEM",
       items: [
-        ["model", "Model", "◇"],
-        ["settings", "Settings", "⚙"],
+        [
+          "model",
+          "Model",
+          "◇",
+        ],
+        [
+          "settings",
+          "Settings",
+          "⚙",
+        ],
       ],
     },
+
     {
       title: "SUPPORT",
       items: [
-        ["about", "About", "ⓘ"],
+        [
+          "about",
+          "About",
+          "ⓘ",
+        ],
       ],
     },
   ];
 
+
   return (
     <aside className="sidebar">
+
       <div className="sidebar-brand">
+
         <div className="logo-mark">
           <span />
           <span />
@@ -359,48 +568,67 @@ function Sidebar({
             Transaction Intelligence
           </div>
         </div>
+
       </div>
 
+
       <nav className="sidebar-navigation">
-        {groups.map((group) => (
-          <div
-            className="nav-group"
-            key={group.title}
-          >
-            <div className="nav-group-title">
-              {group.title}
+
+        {groups.map(
+          (group) => (
+            <div
+              className="nav-group"
+              key={group.title}
+            >
+
+              <div className="nav-group-title">
+                {group.title}
+              </div>
+
+              {group.items.map(
+                ([
+                  id,
+                  label,
+                  icon,
+                ]) => (
+                  <button
+                    key={id}
+                    className={`nav-item ${
+                      activePage === id
+                        ? "active"
+                        : ""
+                    }`}
+                    onClick={() =>
+                      navigate(id)
+                    }
+                  >
+                    <span className="nav-icon">
+                      {icon}
+                    </span>
+
+                    <span className="nav-label">
+                      {label}
+                    </span>
+                  </button>
+                )
+              )}
+
             </div>
+          )
+        )}
 
-            {group.items.map(
-              ([id, label, icon]) => (
-                <button
-                  key={id}
-                  className={`nav-item ${
-                    activePage === id
-                      ? "active"
-                      : ""
-                  }`}
-                  onClick={() => navigate(id)}
-                >
-                  <span className="nav-icon">
-                    {icon}
-                  </span>
-
-                  <span className="nav-label">
-                    {label}
-                  </span>
-                </button>
-              )
-            )}
-          </div>
-        ))}
       </nav>
 
+
       <div className="sidebar-footer">
+
         <div className="sidebar-status">
+
           <span
             className={`status-dot ${
-              apiOnline ? "online" : "offline"
+              apiOnline
+                ? "online"
+                : "offline"
             }`}
           />
 
@@ -417,15 +645,24 @@ function Sidebar({
                 : "FastAPI server unavailable"}
             </span>
           </div>
+
         </div>
 
+
         <div className="sidebar-version">
-          FraudLens <span>v1.0.0</span>
+          FraudLens{" "}
+          <span>
+            v
+            {DEFAULT_MODEL.model_version}
+          </span>
         </div>
+
       </div>
+
     </aside>
   );
 }
+
 
 /* =========================================================
    TOPBAR
@@ -438,21 +675,33 @@ function Topbar({
 }) {
   return (
     <header className="topbar">
+
       <div>
+
         <div className="topbar-eyebrow">
           {page.eyebrow}
         </div>
 
-        <h1>{page.title}</h1>
+        <h1>
+          {page.title}
+        </h1>
 
-        <p>{page.description}</p>
+        <p>
+          {page.description}
+        </p>
+
       </div>
 
+
       <div className="topbar-actions">
+
         <div className="api-indicator">
+
           <span
             className={`status-dot ${
-              apiOnline ? "online" : "offline"
+              apiOnline
+                ? "online"
+                : "offline"
             }`}
           />
 
@@ -461,18 +710,25 @@ function Topbar({
               ? "API Online"
               : "API Offline"}
           </span>
+
         </div>
+
 
         <button
           className="topbar-button"
-          onClick={() => navigate("analyze")}
+          onClick={() =>
+            navigate("analyze")
+          }
         >
           + Analyze Transaction
         </button>
+
       </div>
+
     </header>
   );
 }
+
 
 /* =========================================================
    DASHBOARD
@@ -483,33 +739,47 @@ function Dashboard({
   modelInfo,
   navigate,
 }) {
-  const total = history.length;
+  const total =
+    history.length;
 
-  const fraud = history.filter(
-    (item) => item.fraud
-  ).length;
+  const fraud =
+    history.filter(
+      (item) => item.fraud
+    ).length;
 
-  const legitimate = total - fraud;
+  const legitimate =
+    total - fraud;
 
   const avgRisk =
     total === 0
       ? 0
       : history.reduce(
-          (sum, item) =>
+          (
+            sum,
+            item
+          ) =>
             sum +
-            Number(item.probability || 0),
+            Number(
+              item.probability ||
+                0
+            ),
           0
         ) / total;
 
   const fraudRate =
     total === 0
       ? 0
-      : (fraud / total) * 100;
+      : (fraud / total) *
+        100;
+
 
   return (
     <div className="page">
+
       <section className="page-intro">
+
         <div>
+
           <div className="eyebrow">
             TRANSACTION OVERVIEW
           </div>
@@ -523,17 +793,24 @@ function Dashboard({
             risk levels and fraud detection
             performance from one place.
           </p>
+
         </div>
+
 
         <button
           className="primary-button"
-          onClick={() => navigate("analyze")}
+          onClick={() =>
+            navigate("analyze")
+          }
         >
           + Analyze Transaction
         </button>
+
       </section>
 
+
       <section className="stats-grid">
+
         <StatCard
           label="Total Analyzed"
           value={total}
@@ -569,12 +846,18 @@ function Dashboard({
           icon="%"
           variant="purple"
         />
+
       </section>
 
+
       <section className="dashboard-grid">
+
         <div className="panel model-panel">
+
           <div className="panel-heading">
+
             <div>
+
               <div className="eyebrow">
                 MODEL
               </div>
@@ -582,45 +865,69 @@ function Dashboard({
               <h3>
                 Detection Model
               </h3>
+
             </div>
 
+
             <span className="online-badge">
+
               <span className="status-dot online" />
+
               Online
+
             </span>
+
           </div>
 
+
           <div className="model-grid">
+
             <ModelStat
               label="Algorithm"
-              value={modelInfo.name}
+              value={
+                modelInfo.model_name
+              }
             />
 
             <ModelStat
               label="Version"
-              value={modelInfo.version}
+              value={
+                modelInfo.model_version
+              }
             />
 
             <ModelStat
               label="Threshold"
-              value={modelInfo.threshold}
+              value={
+                modelInfo.threshold
+              }
             />
 
             <ModelStat
               label="Features"
-              value={modelInfo.features}
+              value={
+                modelInfo.feature_count ||
+                30
+              }
             />
+
           </div>
+
 
           <button
             className="secondary-button"
-            onClick={() => navigate("model")}
+            onClick={() =>
+              navigate("model")
+            }
           >
             View Model Details →
           </button>
+
         </div>
 
+
         <div className="panel quick-panel">
+
           <div className="eyebrow">
             QUICK ACTION
           </div>
@@ -641,16 +948,24 @@ function Dashboard({
 
           <button
             className="primary-button full-width"
-            onClick={() => navigate("analyze")}
+            onClick={() =>
+              navigate("analyze")
+            }
           >
             Start Analysis
           </button>
+
         </div>
+
       </section>
 
+
       <section className="panel">
+
         <div className="panel-heading">
+
           <div>
+
             <div className="eyebrow">
               RECENT ACTIVITY
             </div>
@@ -658,7 +973,9 @@ function Dashboard({
             <h3>
               Recent Transactions
             </h3>
+
           </div>
+
 
           {history.length > 0 && (
             <button
@@ -670,7 +987,9 @@ function Dashboard({
               View All →
             </button>
           )}
+
         </div>
+
 
         {history.length === 0 ? (
           <EmptyState
@@ -683,13 +1002,18 @@ function Dashboard({
           />
         ) : (
           <TransactionTable
-            transactions={history.slice(0, 5)}
+            transactions={
+              history.slice(0, 5)
+            }
           />
         )}
+
       </section>
+
     </div>
   );
 }
+
 
 /* =========================================================
    ANALYZE
@@ -701,9 +1025,10 @@ function AnalyzePage({
   onPrediction,
   lastResult,
 }) {
-  const [features, setFeatures] = useState(
-    Array(30).fill("")
-  );
+  const [features, setFeatures] =
+    useState(
+      Array(30).fill("")
+    );
 
   const [result, setResult] =
     useState(lastResult);
@@ -714,67 +1039,90 @@ function AnalyzePage({
   const [error, setError] =
     useState("");
 
+
   useEffect(() => {
     if (lastResult) {
       setResult(lastResult);
     }
   }, [lastResult]);
 
+
   const updateFeature = (
     index,
     value
   ) => {
-    const updated = [...features];
+    const updated = [
+      ...features,
+    ];
+
     updated[index] = value;
+
     setFeatures(updated);
   };
 
+
   const loadExample = () => {
     setFeatures(
-      SAMPLE_TRANSACTION.map(String)
+      SAMPLE_TRANSACTION.map(
+        String
+      )
     );
 
     setResult(null);
     setError("");
   };
 
+
   const clear = () => {
-    setFeatures(Array(30).fill(""));
+    setFeatures(
+      Array(30).fill("")
+    );
+
     setResult(null);
     setError("");
   };
+
 
   const analyze = async () => {
     setError("");
     setResult(null);
 
+
     if (!apiOnline) {
       setError(
         "The FastAPI backend is offline. Start your backend server on port 8000."
       );
+
       return;
     }
 
-    const values = features.map(
-      (value) => {
-        if (
-          value === "" ||
-          value === null ||
-          value === undefined
-        ) {
-          return 0;
+
+    const values =
+      features.map(
+        (value) => {
+          if (
+            value === "" ||
+            value === null ||
+            value ===
+              undefined
+          ) {
+            return 0;
+          }
+
+          const number =
+            Number(value);
+
+          return Number.isFinite(
+            number
+          )
+            ? number
+            : 0;
         }
+      );
 
-        const number =
-          Number(value);
-
-        return Number.isFinite(number)
-          ? number
-          : 0;
-      }
-    );
 
     setLoading(true);
+
 
     try {
       const response =
@@ -782,17 +1130,21 @@ function AnalyzePage({
           `${API_BASE}/predict`,
           {
             method: "POST",
+
             headers: {
               Accept:
                 "application/json",
+
               "Content-Type":
                 "application/json",
             },
+
             body: JSON.stringify({
               features: values,
             }),
           }
         );
+
 
       if (!response.ok) {
         const message =
@@ -804,29 +1156,38 @@ function AnalyzePage({
         );
       }
 
+
       const data =
         await response.json();
 
+
       setResult(data);
+
 
       onPrediction(
         data,
         values
       );
+
     } catch (err) {
       setError(
         err.message ||
           "Unable to analyze transaction."
       );
+
     } finally {
       setLoading(false);
     }
   };
 
+
   return (
     <div className="page">
+
       <section className="page-intro">
+
         <div>
+
           <div className="eyebrow">
             MODEL INPUT
           </div>
@@ -840,13 +1201,20 @@ function AnalyzePage({
             by the deployed fraud detection
             model and submit them for analysis.
           </p>
+
         </div>
+
       </section>
 
+
       <div className="analysis-layout">
+
         <section className="panel feature-panel">
+
           <div className="panel-heading">
+
             <div>
+
               <div className="eyebrow">
                 TRANSACTION FEATURES
               </div>
@@ -858,23 +1226,34 @@ function AnalyzePage({
               <p className="panel-note">
                 Time + V1–V28 + Amount
               </p>
+
             </div>
+
 
             <button
               className="secondary-button"
-              onClick={loadExample}
+              onClick={
+                loadExample
+              }
             >
               Load Example
             </button>
+
           </div>
 
+
           <div className="feature-grid">
+
             {FEATURE_NAMES.map(
-              (name, index) => (
+              (
+                name,
+                index
+              ) => (
                 <div
                   className="feature-field"
                   key={name}
                 >
+
                   <label>
                     {name}
                   </label>
@@ -886,17 +1265,23 @@ function AnalyzePage({
                       features[index]
                     }
                     placeholder="0"
-                    onChange={(event) =>
+                    onChange={(
+                      event
+                    ) =>
                       updateFeature(
                         index,
-                        event.target.value
+                        event.target
+                          .value
                       )
                     }
                   />
+
                 </div>
               )
             )}
+
           </div>
+
 
           {error && (
             <div className="error-message">
@@ -904,52 +1289,69 @@ function AnalyzePage({
             </div>
           )}
 
+
           <div className="form-actions">
+
             <button
               className="secondary-button"
               onClick={clear}
-              disabled={loading}
+              disabled={
+                loading
+              }
             >
               Clear
             </button>
 
+
             <button
               className="primary-button"
               onClick={analyze}
-              disabled={loading}
+              disabled={
+                loading
+              }
             >
               {loading
                 ? "Analyzing..."
                 : "Analyze Transaction"}
             </button>
+
           </div>
+
         </section>
 
+
         <section className="panel result-panel">
+
           <div className="eyebrow">
             MODEL RESULT
           </div>
 
-          {!result && !error && (
-            <div className="result-empty">
-              <div className="result-symbol">
-                ◈
+
+          {!result &&
+            !error && (
+              <div className="result-empty">
+
+                <div className="result-symbol">
+                  ◈
+                </div>
+
+                <h3>
+                  Waiting for Analysis
+                </h3>
+
+                <p>
+                  Submit a transaction to
+                  receive its fraud probability
+                  and classification.
+                </p>
+
               </div>
+            )}
 
-              <h3>
-                Waiting for Analysis
-              </h3>
-
-              <p>
-                Submit a transaction to
-                receive its fraud probability
-                and classification.
-              </p>
-            </div>
-          )}
 
           {error && (
             <div className="result-empty">
+
               <div className="result-symbol error">
                 !
               </div>
@@ -961,115 +1363,139 @@ function AnalyzePage({
               <p>
                 {error}
               </p>
+
             </div>
           )}
 
-          {result && !error && (
-            <div className="result-content">
-              <div
-                className={`result-symbol ${
-                  result.fraud
-                    ? "danger"
-                    : "success"
-                }`}
-              >
-                {result.fraud
-                  ? "!"
-                  : "✓"}
-              </div>
 
-              <div
-                className={`result-label ${
-                  result.fraud
-                    ? "danger-text"
-                    : "success-text"
-                }`}
-              >
-                {result.fraud
-                  ? "FRAUD RISK DETECTED"
-                  : "LEGITIMATE TRANSACTION"}
-              </div>
+          {result &&
+            !error && (
+              <div className="result-content">
 
-              <h3>
-                {result.fraud
-                  ? "Potential Fraud"
-                  : "Transaction Appears Legitimate"}
-              </h3>
-
-              <div className="risk-box">
-                <div className="risk-box-header">
-                  <span>
-                    Fraud Probability
-                  </span>
-
-                  <strong>
-                    {(
-                      Number(
-                        result.probability ||
-                          0
-                      ) * 100
-                    ).toFixed(2)}
-                    %
-                  </strong>
+                <div
+                  className={`result-symbol ${
+                    result.fraud
+                      ? "danger"
+                      : "success"
+                  }`}
+                >
+                  {result.fraud
+                    ? "!"
+                    : "✓"}
                 </div>
 
-                <div className="risk-track">
-                  <div
-                    style={{
-                      width: `${Math.min(
+
+                <div
+                  className={`result-label ${
+                    result.fraud
+                      ? "danger-text"
+                      : "success-text"
+                  }`}
+                >
+                  {result.fraud
+                    ? "FRAUD RISK DETECTED"
+                    : "LEGITIMATE TRANSACTION"}
+                </div>
+
+
+                <h3>
+                  {result.fraud
+                    ? "Potential Fraud"
+                    : "Transaction Appears Legitimate"}
+                </h3>
+
+
+                <div className="risk-box">
+
+                  <div className="risk-box-header">
+
+                    <span>
+                      Fraud Probability
+                    </span>
+
+                    <strong>
+                      {(
                         Number(
                           result.probability ||
                             0
-                        ) * 100,
-                        100
-                      )}%`,
-                    }}
-                  />
-                </div>
+                        ) * 100
+                      ).toFixed(2)}
+                      %
+                    </strong>
 
-                <span className="risk-note">
-                  Decision threshold:{" "}
-                  {(
-                    Number(
-                      result.threshold ??
-                        modelInfo.threshold
-                    ) * 100
-                  ).toFixed(0)}
-                  %
-                </span>
-              </div>
+                  </div>
 
-              <div className="result-meta">
-                <div>
-                  <span>
-                    Classification
+
+                  <div className="risk-track">
+
+                    <div
+                      style={{
+                        width: `${Math.min(
+                          Number(
+                            result.probability ||
+                              0
+                          ) * 100,
+                          100
+                        )}%`,
+                      }}
+                    />
+
+                  </div>
+
+
+                  <span className="risk-note">
+                    Decision threshold:{" "}
+                    {(
+                      Number(
+                        result.threshold ??
+                          modelInfo.threshold
+                      ) * 100
+                    ).toFixed(0)}
+                    %
                   </span>
 
-                  <strong>
-                    {result.fraud
-                      ? "Fraud"
-                      : "Legitimate"}
-                  </strong>
                 </div>
 
-                <div>
-                  <span>
-                    Model Version
-                  </span>
 
-                  <strong>
-                    {result.model_version ||
-                      modelInfo.version}
-                  </strong>
+                <div className="result-meta">
+
+                  <div>
+                    <span>
+                      Classification
+                    </span>
+
+                    <strong>
+                      {result.fraud
+                        ? "Fraud"
+                        : "Legitimate"}
+                    </strong>
+                  </div>
+
+
+                  <div>
+                    <span>
+                      Model Version
+                    </span>
+
+                    <strong>
+                      {result.model_version ||
+                        modelInfo.model_version}
+                    </strong>
+                  </div>
+
                 </div>
+
               </div>
-            </div>
-          )}
+            )}
+
         </section>
+
       </div>
+
     </div>
   );
 }
+
 
 /* =========================================================
    HISTORY
@@ -1086,37 +1512,46 @@ function HistoryPage({
   const [filter, setFilter] =
     useState("all");
 
-  const filtered = history.filter(
-    (item) => {
-      const searchText =
-        `${item.id} ${item.amount} ${new Date(
-          item.timestamp
-        ).toLocaleString()}`.toLowerCase();
 
-      const matchesSearch =
-        searchText.includes(
-          query.toLowerCase()
+  const filtered =
+    history.filter(
+      (item) => {
+        const searchText =
+          `${item.id} ${item.amount} ${new Date(
+            item.timestamp
+          ).toLocaleString()}`.toLowerCase();
+
+        const matchesSearch =
+          searchText.includes(
+            query.toLowerCase()
+          );
+
+        const matchesFilter =
+          filter === "all" ||
+          (
+            filter ===
+              "fraud" &&
+            item.fraud
+          ) ||
+          (
+            filter ===
+              "legitimate" &&
+            !item.fraud
+          );
+
+        return (
+          matchesSearch &&
+          matchesFilter
         );
+      }
+    );
 
-      const matchesFilter =
-        filter === "all" ||
-        (filter === "fraud" &&
-          item.fraud) ||
-        (filter ===
-          "legitimate" &&
-          !item.fraud);
-
-      return (
-        matchesSearch &&
-        matchesFilter
-      );
-    }
-  );
 
   const exportCSV = () => {
     if (!history.length) {
       return;
     }
+
 
     const rows = [
       [
@@ -1128,6 +1563,7 @@ function HistoryPage({
         "Threshold",
         "Model Version",
       ],
+
       ...history.map(
         (item) => [
           item.id,
@@ -1141,44 +1577,67 @@ function HistoryPage({
       ),
     ];
 
-    const csv = rows
-      .map((row) =>
-        row
-          .map(
-            (value) =>
-              `"${String(value).replace(
-                /"/g,
-                '""'
-              )}"`
-          )
-          .join(",")
-      )
-      .join("\n");
+
+    const csv =
+      rows
+        .map(
+          (row) =>
+            row
+              .map(
+                (value) =>
+                  `"${String(
+                    value
+                  ).replace(
+                    /"/g,
+                    '""'
+                  )}"`
+              )
+              .join(",")
+        )
+        .join("\n");
+
 
     const blob =
-      new Blob([csv], {
-        type: "text/csv",
-      });
+      new Blob(
+        [csv],
+        {
+          type:
+            "text/csv",
+        }
+      );
+
 
     const url =
-      URL.createObjectURL(blob);
+      URL.createObjectURL(
+        blob
+      );
+
 
     const anchor =
-      document.createElement("a");
+      document.createElement(
+        "a"
+      );
 
     anchor.href = url;
+
     anchor.download =
       "fraudlens-transactions.csv";
 
     anchor.click();
 
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(
+      url
+    );
   };
+
 
   return (
     <div className="page">
+
       <section className="page-intro history-intro">
+
         <div>
+
           <div className="eyebrow">
             ACTIVITY
           </div>
@@ -1191,16 +1650,22 @@ function HistoryPage({
             Search, filter and export your
             analyzed transaction records.
           </p>
+
         </div>
 
+
         <div className="intro-actions">
+
           <button
             className="secondary-button"
             onClick={exportCSV}
-            disabled={!history.length}
+            disabled={
+              !history.length
+            }
           >
             Export CSV
           </button>
+
 
           <button
             className="primary-button"
@@ -1210,23 +1675,31 @@ function HistoryPage({
           >
             + New Analysis
           </button>
+
         </div>
+
       </section>
 
+
       <section className="stats-grid">
+
         <StatCard
           label="Total Analyzed"
-          value={history.length}
+          value={
+            history.length
+          }
           description="All transactions"
           icon="↗"
           variant="purple"
         />
 
+
         <StatCard
           label="Legitimate"
           value={
             history.filter(
-              (item) => !item.fraud
+              (item) =>
+                !item.fraud
             ).length
           }
           description="Safe transactions"
@@ -1234,11 +1707,13 @@ function HistoryPage({
           variant="green"
         />
 
+
         <StatCard
           label="Fraud Detected"
           value={
             history.filter(
-              (item) => item.fraud
+              (item) =>
+                item.fraud
             ).length
           }
           description="Flagged transactions"
@@ -1246,27 +1721,35 @@ function HistoryPage({
           variant="red"
         />
 
+
         <StatCard
           label="Fraud Rate"
           value={`${(
             history.length
-              ? history.filter(
-                  (item) =>
-                    item.fraud
-                ).length /
-                history.length *
-                100
+              ? (
+                  history.filter(
+                    (item) =>
+                      item.fraud
+                  ).length /
+                    history.length *
+                    100
+                )
               : 0
           ).toFixed(1)}%`}
           description="Detection rate"
           icon="%"
           variant="purple"
         />
+
       </section>
 
+
       <section className="panel">
+
         <div className="history-toolbar">
+
           <div>
+
             <div className="eyebrow">
               RECORDS
             </div>
@@ -1274,62 +1757,91 @@ function HistoryPage({
             <h3>
               All Transactions
             </h3>
+
           </div>
 
+
           <div className="history-tools">
+
             <div className="search-input">
-              <span>⌕</span>
+
+              <span>
+                ⌕
+              </span>
 
               <input
                 value={query}
-                onChange={(event) =>
+                onChange={(
+                  event
+                ) =>
                   setQuery(
                     event.target.value
                   )
                 }
                 placeholder="Search..."
               />
+
             </div>
 
+
             <div className="filter-buttons">
+
               {[
                 ["all", "All"],
                 [
                   "legitimate",
                   "Legitimate",
                 ],
-                ["fraud", "Fraud"],
+                [
+                  "fraud",
+                  "Fraud",
+                ],
               ].map(
-                ([value, label]) => (
+                ([
+                  value,
+                  label,
+                ]) => (
                   <button
                     key={value}
                     className={
-                      filter === value
+                      filter ===
+                      value
                         ? "filter-button active"
                         : "filter-button"
                     }
                     onClick={() =>
-                      setFilter(value)
+                      setFilter(
+                        value
+                      )
                     }
                   >
                     {label}
                   </button>
                 )
               )}
+
             </div>
 
-            {history.length > 0 && (
+
+            {history.length >
+              0 && (
               <button
                 className="danger-outline-button"
-                onClick={clearHistory}
+                onClick={
+                  clearHistory
+                }
               >
                 Clear
               </button>
             )}
+
           </div>
+
         </div>
 
-        {filtered.length === 0 ? (
+
+        {filtered.length ===
+        0 ? (
           <EmptyState
             title={
               history.length
@@ -1352,20 +1864,28 @@ function HistoryPage({
           />
         ) : (
           <TransactionTable
-            transactions={filtered}
+            transactions={
+              filtered
+            }
           />
         )}
+
       </section>
+
     </div>
   );
 }
+
 
 /* =========================================================
    ANALYTICS
 ========================================================= */
 
-function AnalyticsPage({ history }) {
-  const total = history.length;
+function AnalyticsPage({
+  history,
+}) {
+  const total =
+    history.length;
 
   const fraud =
     history.filter(
@@ -1375,17 +1895,23 @@ function AnalyticsPage({ history }) {
   const legitimate =
     total - fraud;
 
+
   const averageRisk =
     total === 0
       ? 0
       : history.reduce(
-          (sum, item) =>
+          (
+            sum,
+            item
+          ) =>
             sum +
             Number(
-              item.probability || 0
+              item.probability ||
+                0
             ),
           0
         ) / total;
+
 
   const maximumRisk =
     total === 0
@@ -1400,20 +1926,32 @@ function AnalyticsPage({ history }) {
           )
         );
 
+
   const legitimatePercent =
     total === 0
       ? 0
-      : (legitimate / total) * 100;
+      : (
+          legitimate /
+          total
+        ) * 100;
+
 
   const fraudPercent =
     total === 0
       ? 0
-      : (fraud / total) * 100;
+      : (
+          fraud /
+          total
+        ) * 100;
+
 
   return (
     <div className="page">
+
       <section className="page-intro">
+
         <div>
+
           <div className="eyebrow">
             ANALYTICS
           </div>
@@ -1426,10 +1964,14 @@ function AnalyticsPage({ history }) {
             Performance metrics calculated
             from your analyzed transactions.
           </p>
+
         </div>
+
       </section>
 
+
       <section className="stats-grid">
+
         <StatCard
           label="Transactions"
           value={total}
@@ -1437,6 +1979,7 @@ function AnalyticsPage({ history }) {
           icon="↗"
           variant="purple"
         />
+
 
         <StatCard
           label="Legitimate"
@@ -1446,6 +1989,7 @@ function AnalyticsPage({ history }) {
           variant="green"
         />
 
+
         <StatCard
           label="Fraud"
           value={fraud}
@@ -1454,19 +1998,25 @@ function AnalyticsPage({ history }) {
           variant="red"
         />
 
+
         <StatCard
           label="Average Risk"
           value={`${(
-            averageRisk * 100
+            averageRisk *
+            100
           ).toFixed(1)}%`}
           description="Mean fraud probability"
           icon="%"
           variant="purple"
         />
+
       </section>
 
+
       <div className="analytics-grid">
+
         <section className="panel analytics-panel">
+
           <div className="eyebrow">
             DISTRIBUTION
           </div>
@@ -1475,6 +2025,7 @@ function AnalyticsPage({ history }) {
             Transaction Classification
           </h3>
 
+
           {total === 0 ? (
             <EmptyState
               title="No analytics yet"
@@ -1482,6 +2033,7 @@ function AnalyticsPage({ history }) {
             />
           ) : (
             <div className="classification-layout">
+
               <div
                 className="donut-chart"
                 style={{
@@ -1489,17 +2041,24 @@ function AnalyticsPage({ history }) {
                     `${legitimatePercent}%`,
                 }}
               >
+
                 <div className="donut-center">
+
                   <strong>
                     {total}
                   </strong>
+
                   <span>
                     Total
                   </span>
+
                 </div>
+
               </div>
 
+
               <div className="chart-legend">
+
                 <LegendRow
                   label="Legitimate"
                   value={legitimate}
@@ -1517,12 +2076,17 @@ function AnalyticsPage({ history }) {
                   }
                   type="red"
                 />
+
               </div>
+
             </div>
           )}
+
         </section>
 
+
         <section className="panel analytics-panel">
+
           <div className="eyebrow">
             RISK PROFILE
           </div>
@@ -1531,18 +2095,23 @@ function AnalyticsPage({ history }) {
             Current Risk Level
           </h3>
 
+
           <div className="risk-profile">
+
             <div
               className="risk-ring"
               style={{
                 "--risk":
                   `${Math.min(
-                    averageRisk * 100,
+                    averageRisk *
+                      100,
                     100
                   )}%`,
               }}
             >
+
               <div>
+
                 <strong>
                   {(
                     averageRisk *
@@ -1554,27 +2123,37 @@ function AnalyticsPage({ history }) {
                 <span>
                   Average
                 </span>
+
               </div>
+
             </div>
 
+
             <div className="risk-facts">
+
               <Fact
                 label="Average Probability"
                 value={`${(
-                  averageRisk * 100
+                  averageRisk *
+                  100
                 ).toFixed(2)}%`}
               />
 
               <Fact
                 label="Highest Probability"
                 value={`${(
-                  maximumRisk * 100
+                  maximumRisk *
+                  100
                 ).toFixed(2)}%`}
               />
 
               <Fact
                 label="Decision Threshold"
-                value="55%"
+                value={`${(
+                  Number(
+                    DEFAULT_MODEL.threshold
+                  ) * 100
+                ).toFixed(0)}%`}
               />
 
               <Fact
@@ -1583,26 +2162,84 @@ function AnalyticsPage({ history }) {
                   1
                 )}%`}
               />
+
             </div>
+
           </div>
+
         </section>
+
       </div>
+
     </div>
   );
 }
 
+
 /* =========================================================
-   MODEL
+   MODEL PAGE
 ========================================================= */
 
 function ModelPage({
   modelInfo,
   apiOnline,
+  loading,
 }) {
+  const formatPercent = (
+    value
+  ) => {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return "—";
+    }
+
+    return `${(
+      Number(value) *
+      100
+    ).toFixed(2)}%`;
+  };
+
+
+  const formatDate = (
+    value
+  ) => {
+    if (!value) {
+      return "—";
+    }
+
+    const date =
+      new Date(value);
+
+    if (
+      Number.isNaN(
+        date.getTime()
+      )
+    ) {
+      return value;
+    }
+
+    return date.toLocaleString(
+      undefined,
+      {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    );
+  };
+
+
   return (
     <div className="page">
+
       <section className="page-intro">
+
         <div>
+
           <div className="eyebrow">
             MACHINE LEARNING
           </div>
@@ -1616,11 +2253,16 @@ function ModelPage({
             currently used for transaction
             risk detection.
           </p>
+
         </div>
+
       </section>
 
+
       <div className="model-layout">
+
         <section className="panel">
+
           <div className="eyebrow">
             DEPLOYED MODEL
           </div>
@@ -1629,20 +2271,28 @@ function ModelPage({
             Model Details
           </h3>
 
+
           <div className="details">
+
             <DetailRow
               label="Algorithm"
-              value={modelInfo.name}
+              value={
+                modelInfo.model_name
+              }
             />
 
             <DetailRow
               label="Version"
-              value={modelInfo.version}
+              value={
+                modelInfo.model_version
+              }
             />
 
             <DetailRow
               label="Decision Threshold"
-              value={modelInfo.threshold}
+              value={Number(
+                modelInfo.threshold
+              ).toFixed(2)}
             />
 
             <DetailRow
@@ -1652,20 +2302,28 @@ function ModelPage({
 
             <DetailRow
               label="Input Features"
-              value={modelInfo.features}
+              value={
+                modelInfo.feature_count ||
+                30
+              }
             />
 
             <DetailRow
               label="Prediction Endpoint"
               value="POST /predict"
             />
+
           </div>
+
         </section>
 
+
         <section className="panel model-status-card">
+
           <div className="eyebrow">
             SYSTEM STATUS
           </div>
+
 
           <div
             className={`model-status-circle ${
@@ -1674,8 +2332,11 @@ function ModelPage({
                 : "danger"
             }`}
           >
-            {apiOnline ? "✓" : "!"}
+            {apiOnline
+              ? "✓"
+              : "!"}
           </div>
+
 
           <h3>
             {apiOnline
@@ -1683,13 +2344,16 @@ function ModelPage({
               : "Model Offline"}
           </h3>
 
+
           <p>
             {apiOnline
               ? "The fraud detection model is available and ready to analyze transactions."
               : "The FastAPI service is currently unavailable."}
           </p>
 
+
           <div className="connected-row">
+
             <span
               className={`status-dot ${
                 apiOnline
@@ -1701,11 +2365,94 @@ function ModelPage({
             {apiOnline
               ? "API Connected"
               : "API Disconnected"}
+
           </div>
+
         </section>
+
       </div>
 
+
+      <section className="panel">
+
+        <div className="eyebrow">
+          MODEL PERFORMANCE
+        </div>
+
+        <h3>
+          Evaluation Metrics
+        </h3>
+
+
+        {loading ? (
+          <div className="metrics-loading">
+            Loading model metrics...
+          </div>
+        ) : (
+          <div className="metrics-grid">
+
+            <MetricCard
+              label="Precision"
+              value={formatPercent(
+                modelInfo.precision
+              )}
+              description="Precision of fraud predictions"
+              variant="purple"
+            />
+
+            <MetricCard
+              label="Recall"
+              value={formatPercent(
+                modelInfo.recall
+              )}
+              description="Fraud cases successfully detected"
+              variant="green"
+            />
+
+            <MetricCard
+              label="F1 Score"
+              value={formatPercent(
+                modelInfo.f1_score
+              )}
+              description="Balance between precision and recall"
+              variant="blue"
+            />
+
+            <MetricCard
+              label="ROC-AUC"
+              value={formatPercent(
+                modelInfo.roc_auc
+              )}
+              description="Overall ranking performance"
+              variant="purple"
+            />
+
+            <MetricCard
+              label="PR-AUC"
+              value={formatPercent(
+                modelInfo.pr_auc
+              )}
+              description="Precision-recall performance"
+              variant="blue"
+            />
+
+            <MetricCard
+              label="Training Date"
+              value={formatDate(
+                modelInfo.training_date
+              )}
+              description="Model training timestamp"
+              variant="neutral"
+            />
+
+          </div>
+        )}
+
+      </section>
+
+
       <section className="panel pipeline-panel">
+
         <div className="eyebrow">
           DETECTION PIPELINE
         </div>
@@ -1714,7 +2461,9 @@ function ModelPage({
           How a Transaction Is Evaluated
         </h3>
 
+
         <div className="pipeline">
+
           <PipelineStep
             number="01"
             title="Input"
@@ -1723,13 +2472,15 @@ function ModelPage({
 
           <PipelineArrow />
 
+
           <PipelineStep
             number="02"
             title="Model"
-            text="Random Forest evaluates the feature vector."
+            text={`${modelInfo.model_name} evaluates the feature vector.`}
           />
 
           <PipelineArrow />
+
 
           <PipelineStep
             number="03"
@@ -1739,16 +2490,25 @@ function ModelPage({
 
           <PipelineArrow />
 
+
           <PipelineStep
             number="04"
             title="Decision"
-            text="Probability is compared with the threshold."
+            text={`Probability is compared with the ${(
+              Number(
+                modelInfo.threshold
+              ) * 100
+            ).toFixed(0)}% threshold.`}
           />
+
         </div>
+
       </section>
+
     </div>
   );
 }
+
 
 /* =========================================================
    SETTINGS
@@ -1760,8 +2520,11 @@ function SettingsPage({
 }) {
   return (
     <div className="page">
+
       <section className="page-intro">
+
         <div>
+
           <div className="eyebrow">
             CONFIGURATION
           </div>
@@ -1774,11 +2537,16 @@ function SettingsPage({
             Current application,
             API and model configuration.
           </p>
+
         </div>
+
       </section>
 
+
       <div className="settings-grid">
+
         <section className="panel">
+
           <div className="eyebrow">
             BACKEND
           </div>
@@ -1787,7 +2555,9 @@ function SettingsPage({
             API Configuration
           </h3>
 
+
           <div className="details">
+
             <DetailRow
               label="Base URL"
               value={API_BASE}
@@ -1800,17 +2570,28 @@ function SettingsPage({
                   ? "Online"
                   : "Offline"
               }
-              success={apiOnline}
+              success={
+                apiOnline
+              }
             />
 
             <DetailRow
               label="Prediction"
               value="POST /predict"
             />
+
+            <DetailRow
+              label="Model Metadata"
+              value="GET /model"
+            />
+
           </div>
+
         </section>
 
+
         <section className="panel">
+
           <div className="eyebrow">
             MODEL
           </div>
@@ -1819,31 +2600,47 @@ function SettingsPage({
             Detection Configuration
           </h3>
 
+
           <div className="details">
+
             <DetailRow
               label="Algorithm"
-              value={modelInfo.name}
+              value={
+                modelInfo.model_name
+              }
             />
 
             <DetailRow
               label="Version"
-              value={modelInfo.version}
+              value={
+                modelInfo.model_version
+              }
             />
 
             <DetailRow
               label="Threshold"
-              value={modelInfo.threshold}
+              value={Number(
+                modelInfo.threshold
+              ).toFixed(2)}
             />
 
             <DetailRow
               label="Features"
-              value={modelInfo.features}
+              value={
+                modelInfo.feature_count ||
+                30
+              }
             />
+
           </div>
+
         </section>
+
       </div>
 
+
       <section className="panel technology-panel">
+
         <div className="eyebrow">
           TECHNOLOGY
         </div>
@@ -1852,7 +2649,9 @@ function SettingsPage({
           Platform Stack
         </h3>
 
+
         <div className="technology-grid">
+
           <TechCard
             title="Frontend"
             value="React + Vite"
@@ -1872,11 +2671,15 @@ function SettingsPage({
             title="Communication"
             value="REST + JSON"
           />
+
         </div>
+
       </section>
+
     </div>
   );
 }
+
 
 /* =========================================================
    ABOUT
@@ -1885,16 +2688,22 @@ function SettingsPage({
 function AboutPage() {
   return (
     <div className="page">
+
       <section className="about-hero">
+
         <div className="about-logo">
+
           <div className="logo-mark large">
             <span />
             <span />
             <span />
           </div>
+
         </div>
 
+
         <div>
+
           <div className="eyebrow light">
             FRAUDLENS
           </div>
@@ -1906,15 +2715,21 @@ function AboutPage() {
           </h2>
 
           <p>
-            A machine-learning powered platform
-            for analyzing transaction risk and
-            identifying potentially fraudulent activity.
+            A machine-learning powered
+            platform for analyzing
+            transaction risk and identifying
+            potentially fraudulent activity.
           </p>
+
         </div>
+
       </section>
 
+
       <div className="about-grid">
+
         <section className="panel">
+
           <div className="eyebrow">
             PURPOSE
           </div>
@@ -1923,6 +2738,7 @@ function AboutPage() {
             What FraudLens Does
           </h3>
 
+
           <p className="about-text">
             FraudLens provides an interface
             for analyzing transaction features
@@ -1930,15 +2746,19 @@ function AboutPage() {
             model.
           </p>
 
+
           <p className="about-text">
             A transaction is submitted through
             the FastAPI backend, which returns
             a fraud probability, decision
             threshold and classification.
           </p>
+
         </section>
 
+
         <section className="panel">
+
           <div className="eyebrow">
             TECHNOLOGY
           </div>
@@ -1947,7 +2767,9 @@ function AboutPage() {
             Technology Stack
           </h3>
 
+
           <div className="stack-list">
+
             <StackRow
               label="Frontend"
               value="React + Vite"
@@ -1967,11 +2789,16 @@ function AboutPage() {
               label="API"
               value="REST + JSON"
             />
+
           </div>
+
         </section>
+
       </div>
 
+
       <section className="panel about-flow">
+
         <div className="eyebrow">
           SYSTEM FLOW
         </div>
@@ -1980,7 +2807,9 @@ function AboutPage() {
           From Transaction to Risk Decision
         </h3>
 
+
         <div className="about-pipeline">
+
           <FlowItem
             number="01"
             title="Transaction"
@@ -1988,6 +2817,7 @@ function AboutPage() {
           />
 
           <PipelineArrow />
+
 
           <FlowItem
             number="02"
@@ -1997,6 +2827,7 @@ function AboutPage() {
 
           <PipelineArrow />
 
+
           <FlowItem
             number="03"
             title="ML Model"
@@ -2005,16 +2836,21 @@ function AboutPage() {
 
           <PipelineArrow />
 
+
           <FlowItem
             number="04"
             title="Result"
             text="Fraud classification"
           />
+
         </div>
+
       </section>
+
     </div>
   );
 }
+
 
 /* =========================================================
    REUSABLE COMPONENTS
@@ -2029,13 +2865,16 @@ function StatCard({
 }) {
   return (
     <div className="stat-card">
+
       <div
         className={`stat-icon ${variant}`}
       >
         {icon}
       </div>
 
+
       <div>
+
         <span className="stat-label">
           {label}
         </span>
@@ -2047,10 +2886,13 @@ function StatCard({
         <small className="stat-description">
           {description}
         </small>
+
       </div>
+
     </div>
   );
 }
+
 
 function ModelStat({
   label,
@@ -2058,32 +2900,91 @@ function ModelStat({
 }) {
   return (
     <div className="model-stat">
-      <span>{label}</span>
-      <strong>{value}</strong>
+
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+
     </div>
   );
 }
+
+
+function MetricCard({
+  label,
+  value,
+  description,
+  variant,
+}) {
+  return (
+    <div
+      className={`metric-card ${variant}`}
+    >
+
+      <span className="metric-label">
+        {label}
+      </span>
+
+      <strong className="metric-value">
+        {value}
+      </strong>
+
+      <small>
+        {description}
+      </small>
+
+    </div>
+  );
+}
+
 
 function TransactionTable({
   transactions,
 }) {
   return (
     <div className="table-wrapper">
+
       <table className="transaction-table">
+
         <thead>
+
           <tr>
-            <th>ID</th>
-            <th>Date & Time</th>
-            <th>Amount</th>
-            <th>Probability</th>
-            <th>Status</th>
+
+            <th>
+              ID
+            </th>
+
+            <th>
+              Date & Time
+            </th>
+
+            <th>
+              Amount
+            </th>
+
+            <th>
+              Probability
+            </th>
+
+            <th>
+              Status
+            </th>
+
           </tr>
+
         </thead>
 
+
         <tbody>
+
           {transactions.map(
             (item) => (
               <tr key={item.id}>
+
                 <td className="transaction-id">
                   TX-
                   {String(
@@ -2091,17 +2992,22 @@ function TransactionTable({
                   ).slice(-6)}
                 </td>
 
+
                 <td>
                   {new Date(
                     item.timestamp
                   ).toLocaleString()}
                 </td>
 
+
                 <td>
-                  ${Number(
-                    item.amount || 0
+                  $
+                  {Number(
+                    item.amount ||
+                      0
                   ).toFixed(2)}
                 </td>
+
 
                 <td>
                   {(
@@ -2113,7 +3019,9 @@ function TransactionTable({
                   %
                 </td>
 
+
                 <td>
+
                   <span
                     className={`status-pill ${
                       item.fraud
@@ -2125,15 +3033,21 @@ function TransactionTable({
                       ? "Fraud"
                       : "Legitimate"}
                   </span>
+
                 </td>
+
               </tr>
             )
           )}
+
         </tbody>
+
       </table>
+
     </div>
   );
 }
+
 
 function EmptyState({
   title,
@@ -2143,13 +3057,19 @@ function EmptyState({
 }) {
   return (
     <div className="empty-state">
+
       <div className="empty-state-icon">
         ◈
       </div>
 
-      <h3>{title}</h3>
+      <h3>
+        {title}
+      </h3>
 
-      <p>{text}</p>
+      <p>
+        {text}
+      </p>
+
 
       {action && (
         <button
@@ -2159,9 +3079,11 @@ function EmptyState({
           {action}
         </button>
       )}
+
     </div>
   );
 }
+
 
 function LegendRow({
   label,
@@ -2171,23 +3093,33 @@ function LegendRow({
 }) {
   return (
     <div className="legend-row">
+
       <div>
+
         <span
           className={`legend-dot ${type}`}
         />
 
-        <span>{label}</span>
+        <span>
+          {label}
+        </span>
+
       </div>
+
 
       <strong>
         {value}{" "}
         <small>
-          ({percent.toFixed(1)}%)
+          (
+          {percent.toFixed(1)}
+          %)
         </small>
       </strong>
+
     </div>
   );
 }
+
 
 function Fact({
   label,
@@ -2195,11 +3127,19 @@ function Fact({
 }) {
   return (
     <div className="fact">
-      <span>{label}</span>
-      <strong>{value}</strong>
+
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+
     </div>
   );
 }
+
 
 function DetailRow({
   label,
@@ -2208,7 +3148,10 @@ function DetailRow({
 }) {
   return (
     <div className="detail-row">
-      <span>{label}</span>
+
+      <span>
+        {label}
+      </span>
 
       <strong
         className={
@@ -2219,9 +3162,11 @@ function DetailRow({
       >
         {value}
       </strong>
+
     </div>
   );
 }
+
 
 function PipelineStep({
   number,
@@ -2230,16 +3175,23 @@ function PipelineStep({
 }) {
   return (
     <div className="pipeline-step">
+
       <span className="pipeline-number">
         {number}
       </span>
 
-      <h4>{title}</h4>
+      <h4>
+        {title}
+      </h4>
 
-      <p>{text}</p>
+      <p>
+        {text}
+      </p>
+
     </div>
   );
 }
+
 
 function PipelineArrow() {
   return (
@@ -2249,17 +3201,26 @@ function PipelineArrow() {
   );
 }
 
+
 function TechCard({
   title,
   value,
 }) {
   return (
     <div className="technology-card">
-      <span>{title}</span>
-      <strong>{value}</strong>
+
+      <span>
+        {title}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+
     </div>
   );
 }
+
 
 function StackRow({
   label,
@@ -2267,11 +3228,19 @@ function StackRow({
 }) {
   return (
     <div className="stack-row">
-      <span>{label}</span>
-      <strong>{value}</strong>
+
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
+
     </div>
   );
 }
+
 
 function FlowItem({
   number,
@@ -2280,11 +3249,19 @@ function FlowItem({
 }) {
   return (
     <div className="flow-item">
-      <span>{number}</span>
 
-      <strong>{title}</strong>
+      <span>
+        {number}
+      </span>
 
-      <small>{text}</small>
+      <strong>
+        {title}
+      </strong>
+
+      <small>
+        {text}
+      </small>
+
     </div>
   );
 }

@@ -36,7 +36,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,9 +49,13 @@ app.add_middleware(
 # Load ML artifacts
 # ============================================================
 
-model = joblib.load("models/fraud_model.pkl")
+model = joblib.load(
+    "models/fraud_model.pkl"
+)
 
-scaler = joblib.load("models/scaler.pkl")
+scaler = joblib.load(
+    "models/scaler.pkl"
+)
 
 feature_list = joblib.load(
     "models/feature_list.pkl"
@@ -94,11 +100,60 @@ class AssistantRequest(BaseModel):
 
 @app.get("/")
 def home():
-
     return {
         "message": "Fraud Detection API is running",
         "version": metadata["model_version"],
-        "ai_assistant": openai_client is not None
+        "ai_assistant": openai_client is not None,
+    }
+
+
+# ============================================================
+# Model information
+# ============================================================
+
+@app.get("/model")
+def model_info():
+    """
+    Return information about the currently
+    deployed fraud detection model.
+    """
+
+    return {
+        "model_name": metadata.get(
+            "model_name",
+            "Random Forest"
+        ),
+        "model_version": metadata.get(
+            "model_version",
+            "1.0.0"
+        ),
+        "threshold": metadata.get(
+            "threshold",
+            0.55
+        ),
+        "precision": metadata.get(
+            "precision"
+        ),
+        "recall": metadata.get(
+            "recall"
+        ),
+        "f1_score": metadata.get(
+            "f1_score"
+        ),
+        "roc_auc": metadata.get(
+            "roc_auc"
+        ),
+        "pr_auc": metadata.get(
+            "pr_auc"
+        ),
+        "training_date": metadata.get(
+            "training_date"
+        ),
+        "features": metadata.get(
+            "features",
+            feature_list
+        ),
+        "feature_count": len(feature_list),
     }
 
 
@@ -109,40 +164,64 @@ def home():
 @app.post("/predict")
 def predict(transaction: Transaction):
 
-    # Check number of features
-    if len(transaction.features) != len(feature_list):
+    # --------------------------------------------------------
+    # Validate number of features
+    # --------------------------------------------------------
+
+    if len(transaction.features) != len(
+        feature_list
+    ):
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Expected {len(feature_list)} features, "
-                f"received {len(transaction.features)}."
-            )
+                f"Expected {len(feature_list)} "
+                f"features, received "
+                f"{len(transaction.features)}."
+            ),
         )
 
-    # Convert incoming features to DataFrame
+    # --------------------------------------------------------
+    # Convert features to DataFrame
+    # --------------------------------------------------------
+
     input_data = pd.DataFrame(
         [transaction.features],
         columns=feature_list
     )
 
+    # --------------------------------------------------------
     # Get fraud probability
+    # --------------------------------------------------------
+
     probability = model.predict_proba(
         input_data
     )[0][1]
 
-    # Load threshold from metadata
-    threshold = metadata["threshold"]
+    # --------------------------------------------------------
+    # Load decision threshold
+    # --------------------------------------------------------
 
+    threshold = float(
+        metadata["threshold"]
+    )
+
+    # --------------------------------------------------------
     # Fraud decision
+    # --------------------------------------------------------
+
     prediction = int(
         probability >= threshold
     )
 
     return {
         "fraud": bool(prediction),
-        "probability": float(probability),
-        "threshold": float(threshold),
-        "model_version": metadata["model_version"]
+        "probability": float(
+            probability
+        ),
+        "threshold": threshold,
+        "model_version": metadata[
+            "model_version"
+        ],
     }
 
 
@@ -151,14 +230,16 @@ def predict(transaction: Transaction):
 # ============================================================
 
 @app.post("/assistant")
-def assistant(request: AssistantRequest):
+def assistant(
+    request: AssistantRequest
+):
 
     message = request.message.strip()
 
     if not message:
         raise HTTPException(
             status_code=400,
-            detail="Message cannot be empty."
+            detail="Message cannot be empty.",
         )
 
     # --------------------------------------------------------
@@ -170,8 +251,9 @@ def assistant(request: AssistantRequest):
             status_code=503,
             detail=(
                 "OpenAI API key is not configured. "
-                "Add OPENAI_API_KEY to ml-service/.env."
-            )
+                "Add OPENAI_API_KEY to "
+                "ml-service/.env."
+            ),
         )
 
     # --------------------------------------------------------
@@ -188,7 +270,8 @@ def assistant(request: AssistantRequest):
     else:
 
         prediction_context = (
-            "No transaction has been analyzed yet."
+            "No transaction has been "
+            "analyzed yet."
         )
 
     # --------------------------------------------------------
@@ -205,7 +288,8 @@ def assistant(request: AssistantRequest):
     else:
 
         history_context = (
-            "No recent transaction history is available."
+            "No recent transaction history "
+            "is available."
         )
 
     # --------------------------------------------------------
@@ -272,14 +356,17 @@ Decision threshold:
         response = openai_client.responses.create(
             model=OPENAI_MODEL,
             instructions=instructions,
-            input=user_input
+            input=user_input,
         )
 
     except Exception as error:
 
         raise HTTPException(
             status_code=502,
-            detail=f"AI assistant request failed: {str(error)}"
+            detail=(
+                f"AI assistant request failed: "
+                f"{str(error)}"
+            ),
         )
 
     # --------------------------------------------------------
@@ -288,5 +375,5 @@ Decision threshold:
 
     return {
         "reply": response.output_text,
-        "model": OPENAI_MODEL
+        "model": OPENAI_MODEL,
     }
