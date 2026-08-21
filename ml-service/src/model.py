@@ -11,6 +11,7 @@ from sqlalchemy.orm import mapped_column
 
 from .database import Base
 
+
 class TransactionRecord(Base):
     __tablename__ = "transactions"
 
@@ -49,6 +50,11 @@ class TransactionRecord(Base):
 
     risk_level: Mapped[str] = mapped_column(
         String(20),
+        nullable=False,
+    )
+
+    risk_explanation: Mapped[str] = mapped_column(
+        String(500),
         nullable=False,
     )
 

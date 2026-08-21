@@ -2395,3 +2395,377 @@ button:disabled {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+/* =========================================================
+   DATABASE-BACKED FRONTEND
+========================================================= */
+
+.global-error {
+  margin: 12px 34px 0;
+  padding: 10px 13px;
+  border: 1px solid #efcccc;
+  border-radius: 8px;
+  background: #fff6f6;
+  color: #c34b4b;
+  font-size: 9px;
+}
+
+.review-select {
+  min-width: 92px;
+  padding: 6px 7px;
+  border: 1px solid #dfe4ec;
+  border-radius: 6px;
+  background: white;
+  color: #66738c;
+  font-size: 8px;
+  outline: none;
+}
+
+.review-select:focus {
+  border-color: #6556dc;
+}
+/* =========================================================
+   TRANSACTION INVESTIGATION
+========================================================= */
+
+.transaction-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #5746dc;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.transaction-link:hover {
+  text-decoration: underline;
+}
+
+.status-pill.medium-risk {
+  background: #fff8e8;
+  color: #b5811b;
+}
+
+.transaction-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(12, 20, 43, 0.35);
+  backdrop-filter: blur(2px);
+}
+
+.transaction-detail-panel {
+  width: min(520px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  padding: 28px;
+  background: white;
+  box-shadow:
+    -12px 0 35px rgba(18, 25, 52, 0.14);
+}
+
+.transaction-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.transaction-detail-header h2 {
+  margin: 6px 0 4px;
+  color: #202a45;
+  font-size: 22px;
+}
+
+.transaction-detail-header p {
+  margin: 0;
+  color: #97a1b4;
+  font-size: 9px;
+}
+
+.detail-close-button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e0e4ec;
+  border-radius: 8px;
+  background: white;
+  color: #7c879c;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.detail-close-button:hover {
+  background: #f7f8fb;
+}
+
+.detail-risk-banner {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 25px;
+}
+
+.detail-risk-banner.low {
+  background: #eefaf4;
+  color: #1b9660;
+}
+
+.detail-risk-banner.medium {
+  background: #fff8e8;
+  color: #a97617;
+}
+
+.detail-risk-banner.high {
+  background: #fff1f1;
+  color: #d34e4e;
+}
+
+.detail-risk-icon {
+  width: 39px;
+  height: 39px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+  font-weight: 750;
+  font-size: 17px;
+}
+
+.detail-risk-banner span,
+.detail-risk-banner strong {
+  display: block;
+}
+
+.detail-risk-banner span {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+}
+
+.detail-risk-banner strong {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.detail-section {
+  padding: 22px 0;
+  border-top: 1px solid #edf0f4;
+}
+
+.detail-section h3 {
+  margin: 6px 0 15px;
+  color: #34405a;
+  font-size: 13px;
+}
+
+.detail-risk-score {
+  padding: 14px;
+  border-radius: 9px;
+  background: #f8f9fc;
+}
+
+.detail-risk-score > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.detail-risk-score span {
+  color: #8f99ad;
+  font-size: 9px;
+}
+
+.detail-risk-score strong {
+  color: #29344e;
+  font-size: 18px;
+}
+
+.detail-risk-track {
+  width: 100%;
+  height: 7px;
+  margin-top: 11px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e7eaf0;
+}
+
+.detail-risk-track > div {
+  height: 100%;
+  border-radius: inherit;
+  background: #2fb675;
+}
+
+.detail-risk-track > div.medium {
+  background: #e4bd49;
+}
+
+.detail-risk-track > div.high {
+  background: linear-gradient(
+    90deg,
+    #e4bf48,
+    #dc5454
+  );
+}
+
+.detail-risk-score small {
+  display: block;
+  margin-top: 8px;
+  color: #99a2b4;
+  font-size: 8px;
+}
+
+.plain-language-explanation {
+  margin-top: 10px;
+  padding: 13px;
+  border: 1px solid #e8eaf1;
+  border-radius: 8px;
+}
+
+.plain-language-explanation strong {
+  color: #59657d;
+  font-size: 8px;
+}
+
+.plain-language-explanation p {
+  margin: 6px 0 0;
+  color: #7d899f;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.detail-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.detail-info-item {
+  padding: 11px;
+  border-radius: 8px;
+  background: #f8f9fc;
+}
+
+.detail-info-item span,
+.detail-info-item strong {
+  display: block;
+}
+
+.detail-info-item span {
+  color: #97a1b4;
+  font-size: 8px;
+}
+
+.detail-info-item strong {
+  margin-top: 5px;
+  color: #39445c;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.review-status-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 13px;
+  border-radius: 8px;
+  background: #f8f9fc;
+}
+
+.review-status-display span {
+  color: #929db1;
+  font-size: 8px;
+}
+
+.review-status-display strong {
+  color: #39445d;
+  font-size: 9px;
+}
+
+.detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+@media (max-width: 600px) {
+  .transaction-detail-panel {
+    padding: 20px;
+  }
+
+  .detail-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-actions {
+    flex-direction: column-reverse;
+  }
+
+  .detail-actions button {
+    width: 100%;
+  }
+}
+/* =========================================================
+   SAMPLE TEST ACTIONS
+========================================================= */
+
+.sample-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.fraud-test-button {
+  border: 1px solid #efcaca;
+  border-radius: 7px;
+  padding: 9px 12px;
+  background: #fff5f5;
+  color: #cc4e4e;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fraud-test-button:hover {
+  background: #ffeded;
+}
+
+.medium-text {
+  color: #b27d18;
+}
+
+.risk-status-circle.medium-risk {
+  background: #fff8e8;
+  color: #b27d18;
+}
+
+.dashboard-risk-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.dashboard-risk-summary .fact {
+  padding: 12px;
+  background: #f8f9fc;
+  border-radius: 8px;
+}
+
+@media (max-width: 700px) {
+  .sample-actions {
+    flex-direction: column;
+  }
+
+  .sample-actions button {
+    width: 100%;
+  }
+
+  .dashboard-risk-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+}

@@ -44,7 +44,6 @@ OPENAI_MODEL = os.getenv(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    # Create tables if they do not already exist.
     Base.metadata.create_all(
         bind=engine
     )
@@ -159,6 +158,31 @@ def get_risk_level(
     return "Low"
 
 
+def get_risk_explanation(
+    probability: float,
+    threshold: float,
+    risk_level: str,
+) -> str:
+
+    if risk_level == "High":
+        return (
+            "Fraud probability exceeds the configured "
+            "decision threshold and the transaction "
+            "should be reviewed."
+        )
+
+    if risk_level == "Medium":
+        return (
+            "The transaction shows elevated risk but "
+            "remains below the fraud decision threshold."
+        )
+
+    return (
+        "The transaction risk is currently below the "
+        "configured review threshold."
+    )
+
+
 def transaction_to_dict(
     transaction: TransactionRecord,
 ):
@@ -173,6 +197,9 @@ def transaction_to_dict(
         "probability": transaction.probability,
         "fraud": transaction.fraud,
         "risk_level": transaction.risk_level,
+        "risk_explanation": (
+            transaction.risk_explanation
+        ),
         "threshold": transaction.threshold,
         "model_version": (
             transaction.model_version
@@ -337,6 +364,17 @@ def predict(
 
 
     # --------------------------------------------------------
+    # Risk explanation
+    # --------------------------------------------------------
+
+    risk_explanation = get_risk_explanation(
+        probability,
+        threshold,
+        risk_level,
+    )
+
+
+    # --------------------------------------------------------
     # Reference
     # --------------------------------------------------------
 
@@ -380,6 +418,10 @@ def predict(
 
         risk_level=risk_level,
 
+        risk_explanation=(
+            risk_explanation
+        ),
+
         threshold=threshold,
 
         model_version=metadata[
@@ -417,6 +459,10 @@ def predict(
         "probability": probability,
 
         "risk_level": risk_level,
+
+        "risk_explanation": (
+            risk_explanation
+        ),
 
         "threshold": threshold,
 

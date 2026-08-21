@@ -1,38 +1,21 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const API_BASE = "http://127.0.0.1:8000";
+import {
+  API_BASE,
+  checkApi,
+  getAnalytics,
+  getModelInfo,
+  getTransactions,
+  predictTransaction,
+  updateReviewStatus,
+} from "./services/api";
 
 const FEATURE_NAMES = [
-  "Time",
-  "V1",
-  "V2",
-  "V3",
-  "V4",
-  "V5",
-  "V6",
-  "V7",
-  "V8",
-  "V9",
-  "V10",
-  "V11",
-  "V12",
-  "V13",
-  "V14",
-  "V15",
-  "V16",
-  "V17",
-  "V18",
-  "V19",
-  "V20",
-  "V21",
-  "V22",
-  "V23",
-  "V24",
-  "V25",
-  "V26",
-  "V27",
-  "V28",
+  "Time", "V1", "V2", "V3", "V4", "V5", "V6", "V7",
+  "V8", "V9", "V10", "V11", "V12", "V13", "V14",
+  "V15", "V16", "V17", "V18", "V19", "V20", "V21",
+  "V22", "V23", "V24", "V25", "V26", "V27", "V28",
   "Amount",
 ];
 
@@ -69,6 +52,43 @@ const SAMPLE_TRANSACTION = [
   149.62,
 ];
 
+/*
+ * Genuine fraud row from the project's creditcard.csv.
+ * Your current saved Random Forest scored this row at 100%.
+ */
+const FRAUD_SAMPLE = [
+  170348.0,
+  1.9919760961759,
+  0.158475887304227,
+  -2.58344064503516,
+  0.408669992998441,
+  1.15114706077937,
+  -0.0966947441848027,
+  0.223050267455537,
+  -0.0683838777747007,
+  0.577829383844873,
+  -0.888721675865145,
+  0.491140241656789,
+  0.728903319843614,
+  0.380428045513993,
+  -1.94888334870021,
+  -0.832498136300872,
+  0.519435549203291,
+  0.903562376617253,
+  1.19731471799372,
+  0.593508846946918,
+  -0.0176522567052908,
+  -0.164350327825504,
+  -0.295135166851559,
+  -0.0721725311018398,
+  -0.450261313423321,
+  0.313266608995469,
+  -0.289616585696882,
+  0.002987582243429,
+  -0.0153088128485981,
+  42.53,
+];
+
 const DEFAULT_MODEL = {
   model_name: "Random Forest",
   model_version: "1.0.0",
@@ -79,8 +99,16 @@ const DEFAULT_MODEL = {
   roc_auc: null,
   pr_auc: null,
   training_date: null,
-  features: FEATURE_NAMES,
   feature_count: 30,
+};
+
+const DEFAULT_ANALYTICS = {
+  total_transactions: 0,
+  legitimate: 0,
+  fraud_detected: 0,
+  fraud_rate: 0,
+  average_risk: 0,
+  highest_risk: 0,
 };
 
 const PAGE_INFO = {
@@ -100,7 +128,7 @@ const PAGE_INFO = {
     eyebrow: "TRANSACTION RECORDS",
     title: "Transaction History",
     description:
-      "Review and explore previously analyzed transactions.",
+      "Review and investigate analyzed transactions.",
   },
   analytics: {
     eyebrow: "PERFORMANCE",
@@ -130,115 +158,129 @@ const PAGE_INFO = {
 
 function App() {
   const [activePage, setActivePage] = useState("dashboard");
-
-  const [history, setHistory] = useState(() => {
-    try {
-      const saved = localStorage.getItem("fraudlens_history");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [apiOnline, setApiOnline] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [analytics, setAnalytics] = useState(DEFAULT_ANALYTICS);
   const [modelInfo, setModelInfo] = useState(DEFAULT_MODEL);
+  const [apiOnline, setApiOnline] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [globalError, setGlobalError] = useState("");
   const [lastResult, setLastResult] = useState(null);
-  const [modelLoading, setModelLoading] = useState(true);
+  const [selectedTransaction, setSelectedTransaction] = useState(null);
 
-  useEffect(() => {
-    localStorage.setItem(
-      "fraudlens_history",
-      JSON.stringify(history)
-    );
-  }, [history]);
+  const loadApplicationData = async () => {
+    try {
+      setGlobalError("");
 
-  useEffect(() => {
-    let mounted = true;
+      const [
+        ,
+        model,
+        transactions,
+        analyticsData,
+      ] = await Promise.all([
+        checkApi(),
+        getModelInfo(),
+        getTransactions(),
+        getAnalytics(),
+      ]);
 
-    const loadBackendData = async () => {
-      try {
-        const healthResponse = await fetch(`${API_BASE}/`);
+      setApiOnline(true);
 
-        if (!mounted) return;
+      setModelInfo({
+        ...DEFAULT_MODEL,
+        ...model,
+      });
 
-        setApiOnline(healthResponse.ok);
+      setHistory(
+        Array.isArray(transactions) ? transactions : []
+      );
 
-        const modelResponse = await fetch(
-          `${API_BASE}/model`
-        );
-
-        if (modelResponse.ok) {
-          const data = await modelResponse.json();
-
-          if (mounted) {
-            setModelInfo({
-              ...DEFAULT_MODEL,
-              ...data,
-            });
-          }
-        }
-      } catch {
-        if (mounted) {
-          setApiOnline(false);
-        }
-      } finally {
-        if (mounted) {
-          setModelLoading(false);
-        }
-      }
-    };
-
-    loadBackendData();
-
-    const interval = setInterval(loadBackendData, 15000);
-
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
-  }, []);
-
-  const addHistoryEntry = (data, values, reference) => {
-    const entry = {
-      id: Date.now(),
-      reference:
-        reference?.trim() ||
-        `TX-${String(Date.now()).slice(-6)}`,
-      timestamp: new Date().toISOString(),
-      amount: Number(values[29] || 0),
-      fraud: Boolean(data.fraud),
-      probability: Number(data.probability || 0),
-      threshold: Number(
-        data.threshold ?? modelInfo.threshold ?? 0.55
-      ),
-      modelVersion:
-        data.model_version ||
-        modelInfo.model_version ||
-        "1.0.0",
-    };
-
-    setHistory((previous) => [entry, ...previous]);
-
-    setLastResult({
-      ...data,
-      entryId: entry.id,
-      reference: entry.reference,
-      amount: entry.amount,
-    });
+      setAnalytics({
+        ...DEFAULT_ANALYTICS,
+        ...analyticsData,
+      });
+    } catch (error) {
+      setApiOnline(false);
+      setGlobalError(
+        error.message || "Unable to connect to the backend."
+      );
+    } finally {
+      setInitialLoading(false);
+    }
   };
+
+  useEffect(() => {
+    loadApplicationData();
+
+    const interval = setInterval(
+      loadApplicationData,
+      15000
+    );
+
+    return () => clearInterval(interval);
+  }, []);
 
   const navigate = (page) => {
     setActivePage(page);
-
     window.scrollTo({
       top: 0,
       behavior: "smooth",
     });
   };
 
-  const clearHistory = () => {
-    setHistory([]);
-    localStorage.removeItem("fraudlens_history");
+  const refreshTransactionData = async () => {
+    try {
+      const [transactions, analyticsData] =
+        await Promise.all([
+          getTransactions(),
+          getAnalytics(),
+        ]);
+
+      setHistory(
+        Array.isArray(transactions) ? transactions : []
+      );
+
+      setAnalytics({
+        ...DEFAULT_ANALYTICS,
+        ...analyticsData,
+      });
+
+      setApiOnline(true);
+
+      return transactions;
+    } catch (error) {
+      setApiOnline(false);
+      setGlobalError(
+        error.message || "Unable to refresh transaction data."
+      );
+      return null;
+    }
+  };
+
+  const handlePrediction = async (data) => {
+    setLastResult(data);
+    await refreshTransactionData();
+  };
+
+  const handleReviewStatus = async (id, status) => {
+    try {
+      const updated = await updateReviewStatus(
+        id,
+        status
+      );
+
+      setHistory((current) =>
+        current.map((item) =>
+          item.id === updated.id ? updated : item
+        )
+      );
+
+      setSelectedTransaction(updated);
+      await refreshTransactionData();
+    } catch (error) {
+      setGlobalError(
+        error.message || "Unable to update review status."
+      );
+    }
   };
 
   const renderPage = () => {
@@ -247,8 +289,11 @@ function App() {
         return (
           <Dashboard
             history={history}
+            analytics={analytics}
             modelInfo={modelInfo}
             navigate={navigate}
+            loading={initialLoading}
+            onSelectTransaction={setSelectedTransaction}
           />
         );
 
@@ -257,7 +302,7 @@ function App() {
           <AnalyzePage
             apiOnline={apiOnline}
             modelInfo={modelInfo}
-            onPrediction={addHistoryEntry}
+            onPrediction={handlePrediction}
             lastResult={lastResult}
           />
         );
@@ -267,19 +312,27 @@ function App() {
           <HistoryPage
             history={history}
             navigate={navigate}
-            clearHistory={clearHistory}
+            onReviewStatusChange={handleReviewStatus}
+            onSelectTransaction={setSelectedTransaction}
+            loading={initialLoading}
           />
         );
 
       case "analytics":
-        return <AnalyticsPage history={history} />;
+        return (
+          <AnalyticsPage
+            history={history}
+            analytics={analytics}
+            loading={initialLoading}
+          />
+        );
 
       case "model":
         return (
           <ModelPage
             modelInfo={modelInfo}
             apiOnline={apiOnline}
-            loading={modelLoading}
+            loading={initialLoading}
           />
         );
 
@@ -298,8 +351,11 @@ function App() {
         return (
           <Dashboard
             history={history}
+            analytics={analytics}
             modelInfo={modelInfo}
             navigate={navigate}
+            loading={initialLoading}
+            onSelectTransaction={setSelectedTransaction}
           />
         );
     }
@@ -320,18 +376,45 @@ function App() {
           apiOnline={apiOnline}
         />
 
+        {globalError && (
+          <div className="global-error">
+            <strong>Backend Notice:</strong>{" "}
+            {globalError}
+          </div>
+        )}
+
         <main className="main-content">
           {renderPage()}
         </main>
 
         <footer className="app-footer">
           <span>FraudLens</span>
-          <span>Intelligent Transaction Risk Detection</span>
+          <span>
+            Intelligent Transaction Risk Detection
+          </span>
           <span>
             Model {modelInfo.model_version || "1.0.0"}
           </span>
         </footer>
       </div>
+
+      {selectedTransaction && (
+        <TransactionDetails
+          transaction={selectedTransaction}
+          onUpdated={(updated) => {
+            setSelectedTransaction(updated);
+
+            setHistory((current) =>
+              current.map((item) =>
+                item.id === updated.id ? updated : item
+              )
+            );
+          }}
+          onClose={() =>
+            setSelectedTransaction(null)
+          }
+        />
+      )}
     </div>
   );
 }
@@ -340,7 +423,11 @@ function App() {
    SIDEBAR
 ========================================================= */
 
-function Sidebar({ activePage, navigate, apiOnline }) {
+function Sidebar({
+  activePage,
+  navigate,
+  apiOnline,
+}) {
   const groups = [
     {
       title: "OVERVIEW",
@@ -380,7 +467,9 @@ function Sidebar({ activePage, navigate, apiOnline }) {
         </div>
 
         <div>
-          <div className="brand-name">FraudLens</div>
+          <div className="brand-name">
+            FraudLens
+          </div>
           <div className="brand-subtitle">
             Transaction Intelligence
           </div>
@@ -445,7 +534,11 @@ function Sidebar({ activePage, navigate, apiOnline }) {
    TOPBAR
 ========================================================= */
 
-function Topbar({ page, navigate, apiOnline }) {
+function Topbar({
+  page,
+  navigate,
+  apiOnline,
+}) {
   return (
     <header className="topbar">
       <div>
@@ -454,7 +547,6 @@ function Topbar({ page, navigate, apiOnline }) {
         </div>
 
         <h1>{page.title}</h1>
-
         <p>{page.description}</p>
       </div>
 
@@ -486,36 +578,57 @@ function Topbar({ page, navigate, apiOnline }) {
    DASHBOARD
 ========================================================= */
 
-function Dashboard({ history, modelInfo, navigate }) {
-  const total = history.length;
+function Dashboard({
+  history,
+  analytics,
+  modelInfo,
+  navigate,
+  loading,
+  onSelectTransaction,
+}) {
+  const total = Number(
+    analytics.total_transactions || 0
+  );
 
-  const fraud = history.filter((item) => item.fraud).length;
+  const fraud = Number(
+    analytics.fraud_detected || 0
+  );
 
-  const legitimate = total - fraud;
+  const legitimate = Number(
+    analytics.legitimate || 0
+  );
 
-  const avgRisk =
-    total === 0
-      ? 0
-      : history.reduce(
-          (sum, item) =>
-            sum + Number(item.probability || 0),
-          0
-        ) / total;
+  const averageRisk = Number(
+    analytics.average_risk || 0
+  );
 
-  const fraudRate =
-    total === 0 ? 0 : (fraud / total) * 100;
+  const fraudRate = Number(
+    analytics.fraud_rate || 0
+  );
+
+  const highRiskTransactions = history
+    .filter((item) => item.risk_level === "High")
+    .slice(0, 4);
+
+  const pendingHighRisk = history.filter(
+    (item) =>
+      item.risk_level === "High" &&
+      item.review_status === "Pending"
+  ).length;
 
   return (
     <div className="page">
       <section className="page-intro">
         <div>
-          <div className="eyebrow">TRANSACTION OVERVIEW</div>
+          <div className="eyebrow">
+            TRANSACTION OVERVIEW
+          </div>
 
           <h2>Fraud Detection Dashboard</h2>
 
           <p>
-            Monitor transaction activity, risk levels and
-            fraud detection performance from one place.
+            Monitor transaction activity, risk levels
+            and fraud detection performance from one place.
           </p>
         </div>
 
@@ -530,15 +643,15 @@ function Dashboard({ history, modelInfo, navigate }) {
       <section className="stats-grid">
         <StatCard
           label="Total Analyzed"
-          value={total}
-          description="All analyzed transactions"
+          value={loading ? "—" : total}
+          description="Stored transactions"
           icon="↗"
           variant="purple"
         />
 
         <StatCard
           label="Legitimate"
-          value={legitimate}
+          value={loading ? "—" : legitimate}
           description="Low-risk transactions"
           icon="✓"
           variant="green"
@@ -546,17 +659,17 @@ function Dashboard({ history, modelInfo, navigate }) {
 
         <StatCard
           label="Fraud Detected"
-          value={fraud}
+          value={loading ? "—" : fraud}
           description="High-risk transactions"
           icon="!"
           variant="red"
         />
 
         <StatCard
-          label="Average Risk"
-          value={`${(avgRisk * 100).toFixed(1)}%`}
-          description={`${fraudRate.toFixed(1)}% fraud rate`}
-          icon="%"
+          label="Pending Review"
+          value={loading ? "—" : pendingHighRisk}
+          description="High-risk cases"
+          icon="◷"
           variant="purple"
         />
       </section>
@@ -629,11 +742,16 @@ function Dashboard({ history, modelInfo, navigate }) {
       <section className="panel">
         <div className="panel-heading">
           <div>
-            <div className="eyebrow">RECENT ACTIVITY</div>
-            <h3>Recent Transactions</h3>
+            <div className="eyebrow">
+              HIGH-RISK ACTIVITY
+            </div>
+
+            <h3>
+              Transactions Requiring Attention
+            </h3>
           </div>
 
-          {history.length > 0 && (
+          {highRiskTransactions.length > 0 && (
             <button
               className="text-button"
               onClick={() => navigate("history")}
@@ -643,25 +761,60 @@ function Dashboard({ history, modelInfo, navigate }) {
           )}
         </div>
 
-        {history.length === 0 ? (
+        {highRiskTransactions.length === 0 ? (
           <EmptyState
-            title="No transactions yet"
-            text="Run your first transaction analysis to start building your activity history."
+            title="No high-risk transactions"
+            text="Transactions with elevated risk will appear here for review."
             action="Analyze Transaction"
             onClick={() => navigate("analyze")}
           />
         ) : (
           <TransactionTable
-            transactions={history.slice(0, 5)}
+            transactions={highRiskTransactions}
+            onReviewStatusChange={() => {}}
+            onSelectTransaction={onSelectTransaction}
           />
         )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <div className="eyebrow">RISK OVERVIEW</div>
+            <h3>Current Transaction Risk</h3>
+          </div>
+        </div>
+
+        <div className="dashboard-risk-summary">
+          <Fact
+            label="Average Risk"
+            value={`${(averageRisk * 100).toFixed(1)}%`}
+          />
+
+          <Fact
+            label="Fraud Rate"
+            value={`${fraudRate.toFixed(1)}%`}
+          />
+
+          <Fact
+            label="Highest Risk"
+            value={`${(
+              Number(analytics.highest_risk || 0) * 100
+            ).toFixed(1)}%`}
+          />
+
+          <Fact
+            label="Transactions"
+            value={total}
+          />
+        </div>
       </section>
     </div>
   );
 }
 
 /* =========================================================
-   USER-FOCUSED ANALYZE PAGE
+   ANALYZE
 ========================================================= */
 
 function AnalyzePage({
@@ -671,25 +824,16 @@ function AnalyzePage({
   lastResult,
 }) {
   const [reference, setReference] = useState("");
-
   const [amount, setAmount] = useState("");
-
   const [transactionTime, setTransactionTime] =
     useState("");
-
   const [showAdvanced, setShowAdvanced] = useState(false);
-
-  const [features, setFeatures] =
-    useState(Array(30).fill(""));
-
-  const [result, setResult] =
-    useState(lastResult);
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
+  const [features, setFeatures] = useState(
+    Array(30).fill("")
+  );
+  const [result, setResult] = useState(lastResult);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (lastResult) {
@@ -711,8 +855,14 @@ function AnalyzePage({
     setFeatures(updated);
   };
 
-  const useSample = () => {
-    setFeatures(SAMPLE_TRANSACTION.map(String));
+  const loadLegitimateSample = () => {
+    setFeatures(
+      SAMPLE_TRANSACTION.map(String)
+    );
+
+    setReference(
+      `TX-${String(Date.now()).slice(-6)}`
+    );
 
     setAmount(
       String(SAMPLE_TRANSACTION[29])
@@ -722,12 +872,26 @@ function AnalyzePage({
       new Date().toLocaleString()
     );
 
-    if (!reference.trim()) {
-      setReference(
-        `TX-${String(Date.now()).slice(-6)}`
-      );
-    }
+    setResult(null);
+    setError("");
+  };
 
+  const loadFraudSample = () => {
+    setFeatures(
+      FRAUD_SAMPLE.map(String)
+    );
+
+    setReference("FRAUD-TEST-001");
+
+    setAmount(
+      String(FRAUD_SAMPLE[29])
+    );
+
+    setTransactionTime(
+      "170348"
+    );
+
+    setShowAdvanced(false);
     setResult(null);
     setError("");
   };
@@ -752,68 +916,45 @@ function AnalyzePage({
       return;
     }
 
-    const values = features.map((value, index) => {
-      if (
-        value === "" ||
-        value === null ||
-        value === undefined
-      ) {
-        // Use the user-facing amount for the
-        // model's Amount feature.
-        if (index === 29 && amount !== "") {
-          return Number(amount) || 0;
+    const values = features.map(
+      (value, index) => {
+        if (
+          value === "" ||
+          value === null ||
+          value === undefined
+        ) {
+          if (index === 29 && amount !== "") {
+            return Number(amount) || 0;
+          }
+
+          return 0;
         }
 
-        return 0;
+        const number = Number(value);
+
+        return Number.isFinite(number)
+          ? number
+          : 0;
       }
+    );
 
-      const number = Number(value);
-
-      return Number.isFinite(number)
-        ? number
-        : 0;
-    });
-
-    // Keep the visible Amount field synchronized
-    // with the model's final feature.
     if (amount !== "") {
-      values[29] = Number(amount) || 0;
+      values[29] =
+        Number(amount) || 0;
     }
 
     setLoading(true);
 
     try {
-      const response = await fetch(
-        `${API_BASE}/predict`,
-        {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            features: values,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const message = await response.text();
-
-        throw new Error(
-          message || "Prediction request failed."
+      const data =
+        await predictTransaction(
+          values,
+          reference,
+          transactionTime
         );
-      }
-
-      const data = await response.json();
 
       setResult(data);
-
-      onPrediction(
-        data,
-        values,
-        reference
-      );
+      onPrediction(data);
     } catch (err) {
       setError(
         err.message ||
@@ -834,14 +975,12 @@ function AnalyzePage({
         0.55
     ) * 100;
 
+  const riskLevel =
+    result?.risk_level ||
+    (result?.fraud ? "High" : "Low");
+
   const isHighRisk =
-    result?.fraud ||
-    Number(result?.probability || 0) >=
-      Number(
-        result?.threshold ??
-          modelInfo.threshold ??
-          0.55
-      );
+    riskLevel === "High";
 
   return (
     <div className="page">
@@ -858,14 +997,23 @@ function AnalyzePage({
             then run the fraud risk assessment.
           </p>
         </div>
+      </section>
 
+      <div className="sample-actions">
         <button
           className="secondary-button"
-          onClick={useSample}
+          onClick={loadLegitimateSample}
         >
-          Use Sample Transaction
+          Use Legitimate Sample
         </button>
-      </section>
+
+        <button
+          className="fraud-test-button"
+          onClick={loadFraudSample}
+        >
+          Test Fraud Scenario
+        </button>
+      </div>
 
       <div className="user-analysis-grid">
         <section className="panel user-input-panel">
@@ -883,41 +1031,52 @@ function AnalyzePage({
 
           <div className="business-input-grid">
             <div className="business-field">
-              <label>Transaction Reference</label>
+              <label>
+                Transaction Reference
+              </label>
 
               <input
                 value={reference}
                 onChange={(event) =>
-                  setReference(event.target.value)
+                  setReference(
+                    event.target.value
+                  )
                 }
                 placeholder="e.g. TX-10482"
               />
 
               <small>
-                Used to identify this transaction in history.
+                Used to identify this transaction
+                in history.
               </small>
             </div>
 
             <div className="business-field">
-              <label>Transaction Amount</label>
+              <label>
+                Transaction Amount
+              </label>
 
               <input
                 type="number"
                 step="0.01"
                 value={amount}
                 onChange={(event) =>
-                  setAmount(event.target.value)
+                  setAmount(
+                    event.target.value
+                  )
                 }
                 placeholder="e.g. 149.62"
               />
 
               <small>
-                The model uses this as its Amount feature.
+                Used as the model's Amount feature.
               </small>
             </div>
 
             <div className="business-field">
-              <label>Transaction Time</label>
+              <label>
+                Transaction Time
+              </label>
 
               <input
                 value={transactionTime}
@@ -926,11 +1085,11 @@ function AnalyzePage({
                     event.target.value
                   )
                 }
-                placeholder="e.g. 21 Aug 2026, 14:30"
+                placeholder="e.g. 170348"
               />
 
               <small>
-                For transaction context and record keeping.
+                Stored with the transaction record.
               </small>
             </div>
           </div>
@@ -948,8 +1107,8 @@ function AnalyzePage({
               </strong>
 
               <p>
-                Technical inputs used directly by the
-                deployed model.
+                Technical inputs used directly
+                by the deployed model.
               </p>
             </div>
 
@@ -964,6 +1123,7 @@ function AnalyzePage({
               {showAdvanced
                 ? "Hide Advanced Inputs"
                 : "Show Advanced Inputs"}
+
               <span>
                 {showAdvanced ? "↑" : "↓"}
               </span>
@@ -973,9 +1133,10 @@ function AnalyzePage({
           {showAdvanced && (
             <div className="advanced-model-section">
               <div className="advanced-warning">
-                These fields are technical model inputs
-                (`Time`, `V1–V28`, and `Amount`). Most users
-                do not need to modify them manually.
+                These are technical model inputs:
+                Time, V1–V28 and Amount. Most
+                users do not need to modify them
+                manually.
               </div>
 
               <div className="feature-grid">
@@ -1003,7 +1164,9 @@ function AnalyzePage({
                             event.target.value
                           );
 
-                          if (name === "Amount") {
+                          if (
+                            name === "Amount"
+                          ) {
                             setAmount(
                               event.target.value
                             );
@@ -1064,8 +1227,8 @@ function AnalyzePage({
               </h3>
 
               <p>
-                Submit the transaction details to
-                generate a fraud risk assessment.
+                Submit a transaction to generate
+                a fraud risk assessment.
               </p>
             </div>
           )}
@@ -1094,34 +1257,43 @@ function AnalyzePage({
                 className={`risk-status-circle ${
                   isHighRisk
                     ? "high-risk"
+                    : riskLevel === "Medium"
+                    ? "medium-risk"
                     : "low-risk"
                 }`}
               >
-                {isHighRisk ? "!" : "✓"}
+                {isHighRisk
+                  ? "!"
+                  : riskLevel === "Medium"
+                  ? "•"
+                  : "✓"}
               </div>
 
               <div
                 className={`assessment-kicker ${
                   isHighRisk
                     ? "danger-text"
+                    : riskLevel === "Medium"
+                    ? "medium-text"
                     : "success-text"
                 }`}
               >
-                {isHighRisk
-                  ? "HIGH RISK"
-                  : "LOW RISK"}
+                {riskLevel.toUpperCase()} RISK
               </div>
 
               <h3>
                 {isHighRisk
                   ? "Potential Fraud"
+                  : riskLevel === "Medium"
+                  ? "Elevated Risk"
                   : "Transaction Appears Legitimate"}
               </h3>
 
               <p className="assessment-summary">
-                {isHighRisk
-                  ? "The model has assigned this transaction a fraud probability above the configured detection threshold."
-                  : "The model has assigned this transaction a fraud probability below the configured detection threshold."}
+                {result.risk_explanation ||
+                  (isHighRisk
+                    ? "The predicted risk exceeds the configured detection threshold and should be reviewed."
+                    : "The predicted risk is below the configured detection threshold.")}
               </p>
 
               <div className="risk-score-card">
@@ -1150,11 +1322,17 @@ function AnalyzePage({
                     }}
                   />
                 </div>
+
+                <small>
+                  Decision threshold:{" "}
+                  {threshold.toFixed(0)}%
+                </small>
               </div>
 
               <div className="assessment-facts">
                 <div>
                   <span>Decision</span>
+
                   <strong>
                     {result.fraud
                       ? "Fraud"
@@ -1163,14 +1341,8 @@ function AnalyzePage({
                 </div>
 
                 <div>
-                  <span>Threshold</span>
-                  <strong>
-                    {threshold.toFixed(0)}%
-                  </strong>
-                </div>
-
-                <div>
                   <span>Transaction</span>
+
                   <strong>
                     {result.reference ||
                       reference ||
@@ -1179,7 +1351,17 @@ function AnalyzePage({
                 </div>
 
                 <div>
+                  <span>Review</span>
+
+                  <strong>
+                    {result.review_status ||
+                      "Pending"}
+                  </strong>
+                </div>
+
+                <div>
                   <span>Model</span>
+
                   <strong>
                     {result.model_version ||
                       modelInfo.model_version}
@@ -1193,8 +1375,9 @@ function AnalyzePage({
                 </strong>
 
                 <span>
-                  This result is a risk signal for
-                  investigation, not absolute proof of fraud.
+                  This is a risk signal for
+                  investigation, not absolute
+                  proof of fraud.
                 </span>
               </div>
             </div>
@@ -1212,117 +1395,67 @@ function AnalyzePage({
 function HistoryPage({
   history,
   navigate,
-  clearHistory,
+  onReviewStatusChange,
+  onSelectTransaction,
+  loading,
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
 
   const filtered = history.filter((item) => {
     const searchText =
-      `${item.reference || ""} ${item.id} ${item.amount} ${new Date(
-        item.timestamp
+      `${item.reference || ""} ${item.id} ${
+        item.amount
+      } ${item.risk_level || ""} ${
+        item.review_status || ""
+      } ${new Date(
+        item.created_at
       ).toLocaleString()}`.toLowerCase();
 
     const matchesSearch =
-      searchText.includes(query.toLowerCase());
+      searchText.includes(
+        query.toLowerCase()
+      );
 
     const matchesFilter =
       filter === "all" ||
       (filter === "fraud" && item.fraud) ||
-      (filter === "legitimate" && !item.fraud);
+      (filter === "legitimate" && !item.fraud) ||
+      (filter === "pending" &&
+        item.review_status === "Pending");
 
     return matchesSearch && matchesFilter;
   });
-
-  const exportCSV = () => {
-    if (!history.length) return;
-
-    const rows = [
-      [
-        "Transaction Reference",
-        "Timestamp",
-        "Amount",
-        "Probability",
-        "Fraud",
-        "Threshold",
-        "Model Version",
-      ],
-      ...history.map((item) => [
-        item.reference || "",
-        item.timestamp,
-        item.amount,
-        item.probability,
-        item.fraud,
-        item.threshold,
-        item.modelVersion,
-      ]),
-    ];
-
-    const csv = rows
-      .map((row) =>
-        row
-          .map(
-            (value) =>
-              `"${String(value).replace(
-                /"/g,
-                '""'
-              )}"`
-          )
-          .join(",")
-      )
-      .join("\n");
-
-    const blob = new Blob([csv], {
-      type: "text/csv",
-    });
-
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-
-    anchor.href = url;
-    anchor.download = "fraudlens-transactions.csv";
-    anchor.click();
-
-    URL.revokeObjectURL(url);
-  };
 
   return (
     <div className="page">
       <section className="page-intro history-intro">
         <div>
-          <div className="eyebrow">ACTIVITY</div>
+          <div className="eyebrow">
+            INVESTIGATION
+          </div>
 
           <h2>Transaction History</h2>
 
           <p>
-            Search, filter and export your analyzed
-            transaction records.
+            Review transactions stored in the FraudLens
+            database and investigate risk signals.
           </p>
         </div>
 
-        <div className="intro-actions">
-          <button
-            className="secondary-button"
-            onClick={exportCSV}
-            disabled={!history.length}
-          >
-            Export CSV
-          </button>
-
-          <button
-            className="primary-button"
-            onClick={() => navigate("analyze")}
-          >
-            + New Analysis
-          </button>
-        </div>
+        <button
+          className="primary-button"
+          onClick={() => navigate("analyze")}
+        >
+          + New Analysis
+        </button>
       </section>
 
       <section className="stats-grid">
         <StatCard
-          label="Total Analyzed"
-          value={history.length}
-          description="All transactions"
+          label="Total"
+          value={loading ? "—" : history.length}
+          description="Stored transactions"
           icon="↗"
           variant="purple"
         />
@@ -1330,40 +1463,44 @@ function HistoryPage({
         <StatCard
           label="Legitimate"
           value={
-            history.filter(
-              (item) => !item.fraud
-            ).length
+            loading
+              ? "—"
+              : history.filter(
+                  (item) => !item.fraud
+                ).length
           }
-          description="Safe transactions"
+          description="Low-risk"
           icon="✓"
           variant="green"
         />
 
         <StatCard
-          label="Fraud Detected"
+          label="Fraud"
           value={
-            history.filter(
-              (item) => item.fraud
-            ).length
+            loading
+              ? "—"
+              : history.filter(
+                  (item) => item.fraud
+                ).length
           }
-          description="Flagged transactions"
+          description="High-risk"
           icon="!"
           variant="red"
         />
 
         <StatCard
-          label="Fraud Rate"
-          value={`${(
-            history.length
-              ? (history.filter(
-                  (item) => item.fraud
-                ).length /
-                  history.length) *
-                100
-              : 0
-          ).toFixed(1)}%`}
-          description="Detection rate"
-          icon="%"
+          label="Pending Review"
+          value={
+            loading
+              ? "—"
+              : history.filter(
+                  (item) =>
+                    item.review_status ===
+                    "Pending"
+                ).length
+          }
+          description="Needs attention"
+          icon="◷"
           variant="purple"
         />
       </section>
@@ -1393,6 +1530,7 @@ function HistoryPage({
                 ["all", "All"],
                 ["legitimate", "Legitimate"],
                 ["fraud", "Fraud"],
+                ["pending", "Pending"],
               ].map(([value, label]) => (
                 <button
                   key={value}
@@ -1401,21 +1539,14 @@ function HistoryPage({
                       ? "filter-button active"
                       : "filter-button"
                   }
-                  onClick={() => setFilter(value)}
+                  onClick={() =>
+                    setFilter(value)
+                  }
                 >
                   {label}
                 </button>
               ))}
             </div>
-
-            {history.length > 0 && (
-              <button
-                className="danger-outline-button"
-                onClick={clearHistory}
-              >
-                Clear
-              </button>
-            )}
           </div>
         </div>
 
@@ -1429,18 +1560,26 @@ function HistoryPage({
             text={
               history.length
                 ? "Try another search or filter."
-                : "Analyze a transaction and the result will appear here."
+                : "Analyze a transaction to create your first database record."
             }
             action={
               history.length
                 ? null
                 : "Analyze Transaction"
             }
-            onClick={() => navigate("analyze")}
+            onClick={() =>
+              navigate("analyze")
+            }
           />
         ) : (
           <TransactionTable
             transactions={filtered}
+            onReviewStatusChange={
+              onReviewStatusChange
+            }
+            onSelectTransaction={
+              onSelectTransaction
+            }
           />
         )}
       </section>
@@ -1452,34 +1591,32 @@ function HistoryPage({
    ANALYTICS
 ========================================================= */
 
-function AnalyticsPage({ history }) {
-  const total = history.length;
+function AnalyticsPage({
+  history,
+  analytics,
+  loading,
+}) {
+  const total = Number(
+    analytics.total_transactions ||
+      history.length ||
+      0
+  );
 
-  const fraud = history.filter(
-    (item) => item.fraud
-  ).length;
+  const fraud = Number(
+    analytics.fraud_detected || 0
+  );
 
-  const legitimate = total - fraud;
+  const legitimate = Number(
+    analytics.legitimate || 0
+  );
 
-  const averageRisk =
-    total === 0
-      ? 0
-      : history.reduce(
-          (sum, item) =>
-            sum +
-            Number(item.probability || 0),
-          0
-        ) / total;
+  const averageRisk = Number(
+    analytics.average_risk || 0
+  );
 
-  const maximumRisk =
-    total === 0
-      ? 0
-      : Math.max(
-          ...history.map(
-            (item) =>
-              Number(item.probability || 0)
-          )
-        );
+  const maximumRisk = Number(
+    analytics.highest_risk || 0
+  );
 
   const legitimatePercent =
     total === 0
@@ -1500,8 +1637,8 @@ function AnalyticsPage({ history }) {
           <h2>Detection Insights</h2>
 
           <p>
-            Performance metrics calculated from your
-            analyzed transactions.
+            Metrics calculated directly from your
+            stored transactions.
           </p>
         </div>
       </section>
@@ -1509,33 +1646,37 @@ function AnalyticsPage({ history }) {
       <section className="stats-grid">
         <StatCard
           label="Transactions"
-          value={total}
-          description="Analyzed transactions"
+          value={loading ? "—" : total}
+          description="Stored transactions"
           icon="↗"
           variant="purple"
         />
 
         <StatCard
           label="Legitimate"
-          value={legitimate}
-          description="Low-risk classifications"
+          value={loading ? "—" : legitimate}
+          description="Low-risk"
           icon="✓"
           variant="green"
         />
 
         <StatCard
           label="Fraud"
-          value={fraud}
-          description="High-risk classifications"
+          value={loading ? "—" : fraud}
+          description="High-risk"
           icon="!"
           variant="red"
         />
 
         <StatCard
           label="Average Risk"
-          value={`${(
-            averageRisk * 100
-          ).toFixed(1)}%`}
+          value={
+            loading
+              ? "—"
+              : `${(
+                  averageRisk * 100
+                ).toFixed(1)}%`
+          }
           description="Mean fraud probability"
           icon="%"
           variant="purple"
@@ -1544,7 +1685,9 @@ function AnalyticsPage({ history }) {
 
       <div className="analytics-grid">
         <section className="panel analytics-panel">
-          <div className="eyebrow">DISTRIBUTION</div>
+          <div className="eyebrow">
+            DISTRIBUTION
+          </div>
 
           <h3>Transaction Classification</h3>
 
@@ -1588,7 +1731,9 @@ function AnalyticsPage({ history }) {
         </section>
 
         <section className="panel analytics-panel">
-          <div className="eyebrow">RISK PROFILE</div>
+          <div className="eyebrow">
+            RISK PROFILE
+          </div>
 
           <h3>Current Risk Level</h3>
 
@@ -1605,9 +1750,10 @@ function AnalyticsPage({ history }) {
             >
               <div>
                 <strong>
-                  {(averageRisk * 100).toFixed(1)}%
+                  {(
+                    averageRisk * 100
+                  ).toFixed(1)}%
                 </strong>
-
                 <span>Average</span>
               </div>
             </div>
@@ -1634,7 +1780,9 @@ function AnalyticsPage({ history }) {
 
               <Fact
                 label="Fraud Rate"
-                value={`${fraudPercent.toFixed(1)}%`}
+                value={`${fraudPercent.toFixed(
+                  1
+                )}%`}
               />
             </div>
           </div>
@@ -1702,15 +1850,17 @@ function ModelPage({
           <h2>Model Intelligence</h2>
 
           <p>
-            Information about the model currently used for
-            transaction risk detection.
+            Information about the model currently
+            used for transaction risk detection.
           </p>
         </div>
       </section>
 
       <div className="model-layout">
         <section className="panel">
-          <div className="eyebrow">DEPLOYED MODEL</div>
+          <div className="eyebrow">
+            DEPLOYED MODEL
+          </div>
 
           <h3>Model Details</h3>
 
@@ -1739,7 +1889,10 @@ function ModelPage({
 
             <DetailRow
               label="Input Features"
-              value={modelInfo.feature_count || 30}
+              value={
+                modelInfo.feature_count ||
+                30
+              }
             />
 
             <DetailRow
@@ -1750,11 +1903,15 @@ function ModelPage({
         </section>
 
         <section className="panel model-status-card">
-          <div className="eyebrow">SYSTEM STATUS</div>
+          <div className="eyebrow">
+            SYSTEM STATUS
+          </div>
 
           <div
             className={`model-status-circle ${
-              apiOnline ? "success" : "danger"
+              apiOnline
+                ? "success"
+                : "danger"
             }`}
           >
             {apiOnline ? "✓" : "!"}
@@ -1775,7 +1932,9 @@ function ModelPage({
           <div className="connected-row">
             <span
               className={`status-dot ${
-                apiOnline ? "online" : "offline"
+                apiOnline
+                  ? "online"
+                  : "offline"
               }`}
             />
 
@@ -1787,7 +1946,9 @@ function ModelPage({
       </div>
 
       <section className="panel">
-        <div className="eyebrow">MODEL PERFORMANCE</div>
+        <div className="eyebrow">
+          MODEL PERFORMANCE
+        </div>
 
         <h3>Evaluation Metrics</h3>
 
@@ -1855,7 +2016,9 @@ function ModelPage({
       </section>
 
       <section className="panel pipeline-panel">
-        <div className="eyebrow">DETECTION PIPELINE</div>
+        <div className="eyebrow">
+          DETECTION PIPELINE
+        </div>
 
         <h3>
           How a Transaction Is Evaluated
@@ -1890,8 +2053,9 @@ function ModelPage({
             number="04"
             title="Decision"
             text={`Probability is compared with the ${(
-              Number(modelInfo.threshold) *
-              100
+              Number(
+                modelInfo.threshold
+              ) * 100
             ).toFixed(0)}% threshold.`}
           />
         </div>
@@ -1919,7 +2083,8 @@ function SettingsPage({
           <h2>Settings</h2>
 
           <p>
-            Current application, API and model configuration.
+            Current application, API and model
+            configuration.
           </p>
         </div>
       </section>
@@ -1939,7 +2104,9 @@ function SettingsPage({
             <DetailRow
               label="Status"
               value={
-                apiOnline ? "Online" : "Offline"
+                apiOnline
+                  ? "Online"
+                  : "Offline"
               }
               success={apiOnline}
             />
@@ -1950,8 +2117,13 @@ function SettingsPage({
             />
 
             <DetailRow
-              label="Model Metadata"
-              value="GET /model"
+              label="Transactions"
+              value="GET /transactions"
+            />
+
+            <DetailRow
+              label="Analytics"
+              value="GET /analytics"
             />
           </div>
         </section>
@@ -1959,7 +2131,9 @@ function SettingsPage({
         <section className="panel">
           <div className="eyebrow">MODEL</div>
 
-          <h3>Detection Configuration</h3>
+          <h3>
+            Detection Configuration
+          </h3>
 
           <div className="details">
             <DetailRow
@@ -1981,7 +2155,10 @@ function SettingsPage({
 
             <DetailRow
               label="Features"
-              value={modelInfo.feature_count || 30}
+              value={
+                modelInfo.feature_count ||
+                30
+              }
             />
           </div>
         </section>
@@ -2004,13 +2181,13 @@ function SettingsPage({
           />
 
           <TechCard
-            title="Machine Learning"
-            value="Python + Scikit-learn"
+            title="Database"
+            value="PostgreSQL"
           />
 
           <TechCard
-            title="Communication"
-            value="REST + JSON"
+            title="Machine Learning"
+            value="Scikit-learn"
           />
         </div>
       </section>
@@ -2046,9 +2223,9 @@ function AboutPage() {
           </h2>
 
           <p>
-            A machine-learning powered platform for
-            analyzing transaction risk and identifying
-            potentially fraudulent activity.
+            A machine-learning powered platform
+            for analyzing transaction risk and
+            identifying potentially fraudulent activity.
           </p>
         </div>
       </section>
@@ -2060,15 +2237,16 @@ function AboutPage() {
           <h3>What FraudLens Does</h3>
 
           <p className="about-text">
-            FraudLens provides an interface for analyzing
-            transaction features through a deployed
-            machine-learning model.
+            FraudLens analyzes transaction data,
+            assigns a fraud probability and helps
+            users prioritize potentially suspicious
+            transactions for review.
           </p>
 
           <p className="about-text">
-            A transaction is submitted through the FastAPI
-            backend, which returns a fraud probability,
-            decision threshold and classification.
+            Predictions and transaction records are
+            served through FastAPI and stored in
+            PostgreSQL.
           </p>
         </section>
 
@@ -2089,13 +2267,13 @@ function AboutPage() {
             />
 
             <StackRow
-              label="Machine Learning"
-              value="Python + Scikit-learn"
+              label="Database"
+              value="PostgreSQL"
             />
 
             <StackRow
-              label="API"
-              value="REST + JSON"
+              label="Machine Learning"
+              value="Python + Scikit-learn"
             />
           </div>
         </section>
@@ -2135,8 +2313,8 @@ function AboutPage() {
 
           <FlowItem
             number="04"
-            title="Result"
-            text="Fraud classification"
+            title="PostgreSQL"
+            text="Persistent record"
           />
         </div>
       </section>
@@ -2145,7 +2323,427 @@ function AboutPage() {
 }
 
 /* =========================================================
-   COMPONENTS
+   TABLE
+========================================================= */
+
+function TransactionTable({
+  transactions,
+  onReviewStatusChange,
+  onSelectTransaction,
+}) {
+  return (
+    <div className="table-wrapper">
+      <table className="transaction-table">
+        <thead>
+          <tr>
+            <th>Reference</th>
+            <th>Date & Time</th>
+            <th>Amount</th>
+            <th>Risk</th>
+            <th>Decision</th>
+            <th>Review</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {transactions.map((item) => (
+            <tr key={item.id}>
+              <td className="transaction-id">
+                <button
+                  className="transaction-link"
+                  onClick={() =>
+                    onSelectTransaction(
+                      item
+                    )
+                  }
+                >
+                  {item.reference ||
+                    `TX-${String(
+                      item.id
+                    ).slice(-6)}`}
+                </button>
+              </td>
+
+              <td>
+                {item.created_at
+                  ? new Date(
+                      item.created_at
+                    ).toLocaleString()
+                  : "—"}
+              </td>
+
+              <td>
+                $
+                {Number(
+                  item.amount || 0
+                ).toFixed(2)}
+              </td>
+
+              <td>
+                <span
+                  className={`status-pill ${
+                    item.risk_level === "High"
+                      ? "fraud"
+                      : item.risk_level === "Medium"
+                      ? "medium-risk"
+                      : "safe"
+                  }`}
+                >
+                  {item.risk_level || "Low"}
+                </span>
+              </td>
+
+              <td>
+                <span
+                  className={`status-pill ${
+                    item.fraud
+                      ? "fraud"
+                      : "safe"
+                  }`}
+                >
+                  {item.fraud
+                    ? "Fraud"
+                    : "Legitimate"}
+                </span>
+              </td>
+
+              <td>
+                <select
+                  className="review-select"
+                  value={
+                    item.review_status ||
+                    "Pending"
+                  }
+                  onChange={(event) =>
+                    onReviewStatusChange(
+                      item.id,
+                      event.target.value
+                    )
+                  }
+                >
+                  <option value="Pending">
+                    Pending
+                  </option>
+
+                  <option value="Reviewed">
+                    Reviewed
+                  </option>
+
+                  <option value="Dismissed">
+                    Dismissed
+                  </option>
+                </select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* =========================================================
+   TRANSACTION DETAILS
+========================================================= */
+
+function TransactionDetails({
+  transaction,
+  onUpdated,
+  onClose,
+}) {
+  const [updating, setUpdating] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  if (!transaction) {
+    return null;
+  }
+
+  const isHighRisk =
+    transaction.risk_level === "High";
+
+  const isMediumRisk =
+    transaction.risk_level === "Medium";
+
+  const probability =
+    Number(
+      transaction.probability || 0
+    ) * 100;
+
+  const threshold =
+    Number(
+      transaction.threshold || 0.55
+    ) * 100;
+
+  const handleStatusChange =
+    async (status) => {
+      setUpdating(true);
+      setError("");
+
+      try {
+        const updated =
+          await updateReviewStatus(
+            transaction.id,
+            status
+          );
+
+        onUpdated(updated);
+      } catch (err) {
+        setError(
+          err.message ||
+            "Unable to update review status."
+        );
+      } finally {
+        setUpdating(false);
+      }
+    };
+
+  return (
+    <div className="transaction-detail-overlay">
+      <div className="transaction-detail-panel">
+        <div className="transaction-detail-header">
+          <div>
+            <div className="eyebrow">
+              TRANSACTION REVIEW
+            </div>
+
+            <h2>
+              {transaction.reference}
+            </h2>
+
+            <p>
+              Transaction #{transaction.id}
+            </p>
+          </div>
+
+          <button
+            className="detail-close-button"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        <div
+          className={`detail-risk-banner ${
+            isHighRisk
+              ? "high"
+              : isMediumRisk
+              ? "medium"
+              : "low"
+          }`}
+        >
+          <div className="detail-risk-icon">
+            {isHighRisk
+              ? "!"
+              : isMediumRisk
+              ? "•"
+              : "✓"}
+          </div>
+
+          <div>
+            <span>
+              {isHighRisk
+                ? "HIGH RISK"
+                : isMediumRisk
+                ? "MEDIUM RISK"
+                : "LOW RISK"}
+            </span>
+
+            <strong>
+              {transaction.fraud
+                ? "Potential Fraud"
+                : "Transaction Appears Legitimate"}
+            </strong>
+          </div>
+        </div>
+
+        <div className="detail-section">
+          <div className="eyebrow">
+            RISK ASSESSMENT
+          </div>
+
+          <h3>
+            Why was this transaction classified this way?
+          </h3>
+
+          <div className="detail-risk-score">
+            <div>
+              <span>
+                Fraud Probability
+              </span>
+
+              <strong>
+                {probability.toFixed(2)}%
+              </strong>
+            </div>
+
+            <div className="detail-risk-track">
+              <div
+                className={
+                  isHighRisk
+                    ? "high"
+                    : isMediumRisk
+                    ? "medium"
+                    : ""
+                }
+                style={{
+                  width: `${Math.min(
+                    probability,
+                    100
+                  )}%`,
+                }}
+              />
+            </div>
+
+            <small>
+              Decision threshold:{" "}
+              {threshold.toFixed(0)}%
+            </small>
+          </div>
+
+          <div className="plain-language-explanation">
+            <strong>
+              Explanation
+            </strong>
+
+            <p>
+              {transaction.risk_explanation ||
+                "No explanation is available for this transaction."}
+            </p>
+          </div>
+        </div>
+
+        <div className="detail-section">
+          <div className="eyebrow">
+            TRANSACTION INFORMATION
+          </div>
+
+          <div className="detail-info-grid">
+            <DetailItem
+              label="Amount"
+              value={`$${Number(
+                transaction.amount || 0
+              ).toFixed(2)}`}
+            />
+
+            <DetailItem
+              label="Classification"
+              value={
+                transaction.fraud
+                  ? "Fraud"
+                  : "Legitimate"
+              }
+            />
+
+            <DetailItem
+              label="Risk Level"
+              value={
+                transaction.risk_level ||
+                "Low"
+              }
+            />
+
+            <DetailItem
+              label="Model Version"
+              value={
+                transaction.model_version ||
+                "1.0.0"
+              }
+            />
+
+            <DetailItem
+              label="Review Status"
+              value={
+                transaction.review_status ||
+                "Pending"
+              }
+            />
+
+            <DetailItem
+              label="Analyzed"
+              value={
+                transaction.created_at
+                  ? new Date(
+                      transaction.created_at
+                    ).toLocaleString()
+                  : "—"
+              }
+            />
+          </div>
+        </div>
+
+        <div className="detail-section">
+          <div className="eyebrow">
+            REVIEW
+          </div>
+
+          <div className="review-status-display">
+            <span>
+              Current Status
+            </span>
+
+            <strong>
+              {transaction.review_status ||
+                "Pending"}
+            </strong>
+          </div>
+
+          {error && (
+            <div className="error-message">
+              {error}
+            </div>
+          )}
+
+          <div className="detail-actions">
+            <button
+              className="secondary-button"
+              onClick={() =>
+                handleStatusChange(
+                  "Dismissed"
+                )
+              }
+              disabled={updating}
+            >
+              Dismiss
+            </button>
+
+            <button
+              className="primary-button"
+              onClick={() =>
+                handleStatusChange(
+                  "Reviewed"
+                )
+              }
+              disabled={updating}
+            >
+              {updating
+                ? "Updating..."
+                : "Mark as Reviewed"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailItem({
+  label,
+  value,
+}) {
+  return (
+    <div className="detail-info-item">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+/* =========================================================
+   SHARED COMPONENTS
 ========================================================= */
 
 function StatCard({
@@ -2180,7 +2778,10 @@ function StatCard({
   );
 }
 
-function ModelStat({ label, value }) {
+function ModelStat({
+  label,
+  value,
+}) {
   return (
     <div className="model-stat">
       <span>{label}</span>
@@ -2196,77 +2797,18 @@ function MetricCard({
   variant,
 }) {
   return (
-    <div className={`metric-card ${variant}`}>
-      <span className="metric-label">{label}</span>
+    <div
+      className={`metric-card ${variant}`}
+    >
+      <span className="metric-label">
+        {label}
+      </span>
 
       <strong className="metric-value">
         {value}
       </strong>
 
       <small>{description}</small>
-    </div>
-  );
-}
-
-function TransactionTable({
-  transactions,
-}) {
-  return (
-    <div className="table-wrapper">
-      <table className="transaction-table">
-        <thead>
-          <tr>
-            <th>Reference</th>
-            <th>Date & Time</th>
-            <th>Amount</th>
-            <th>Probability</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {transactions.map((item) => (
-            <tr key={item.id}>
-              <td className="transaction-id">
-                {item.reference ||
-                  `TX-${String(item.id).slice(-6)}`}
-              </td>
-
-              <td>
-                {new Date(
-                  item.timestamp
-                ).toLocaleString()}
-              </td>
-
-              <td>
-                ${Number(
-                  item.amount || 0
-                ).toFixed(2)}
-              </td>
-
-              <td>
-                {(
-                  Number(item.probability || 0) *
-                  100
-                ).toFixed(2)}
-                %
-              </td>
-
-              <td>
-                <span
-                  className={`status-pill ${
-                    item.fraud ? "fraud" : "safe"
-                  }`}
-                >
-                  {item.fraud
-                    ? "Fraud"
-                    : "Legitimate"}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -2325,7 +2867,10 @@ function LegendRow({
   );
 }
 
-function Fact({ label, value }) {
+function Fact({
+  label,
+  value,
+}) {
   return (
     <div className="fact">
       <span>{label}</span>
@@ -2344,9 +2889,7 @@ function DetailRow({
       <span>{label}</span>
 
       <strong
-        className={
-          success ? "success-text" : ""
-        }
+        className={success ? "success-text" : ""}
       >
         {value}
       </strong>
@@ -2366,7 +2909,6 @@ function PipelineStep({
       </span>
 
       <h4>{title}</h4>
-
       <p>{text}</p>
     </div>
   );
